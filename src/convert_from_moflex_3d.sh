@@ -1,0 +1,1 @@
+ffmpeg -i $1 -filter_complex "[0:v]select=mod(n+1\,2)[vl];[0:v]select=mod(n\,2)[vr];[vl][vr]hstack=2[stacked];[stacked]select=mod(n+1\,2)[selected];[selected]scale=iw:ih*2:flags=neighbor[out]" -map "[out]:0" -map 0:a $1.3d.mp4

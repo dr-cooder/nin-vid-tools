@@ -1,0 +1,28 @@
+{
+  "name": "nin-vid-tools",
+  "version": "0.0.1",
+  "description": "Command-line tools to extract and rebuild Nintendo Video BOSS files",
+  "type": "module",
+  "main": "./src/main.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dr-cooder/nin-vid-tools.git"
+  },
+  "author": "Felix Warner",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/dr-cooder/nin-vid-tools/issues"
+  },
+  "homepage": "https://github.com/dr-cooder/nin-vid-tools#readme",
+  "scripts": {
+    "lint": "eslint ./src",
+    "lint:fix": "eslint ./src --fix"
+  },
+  "devDependencies": {
+    "@pretendonetwork/boss-crypto": "^1.0.0",
+    "@pretendonetwork/eslint-config": "^0.1.3",
+    "@types/node": "^25.3.3",
+    "command-line-args": "^6.0.1",
+    "readline-sync": "^1.4.10"
+  }
+}
