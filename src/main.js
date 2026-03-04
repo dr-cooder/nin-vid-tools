@@ -165,7 +165,7 @@ const getOffsetsAndEnd = ({ dataSections, metadata, subfiles, adCount }) => {
 		} = dataSection;
 		const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : UINT_LENGTHS[dataSectionFormat];
 		const dataSectionValue = getValue(metadata, dataSectionKey);
-		const untilOffset = cursor + Buffer.from(dataSectionValue, String).length;
+		const untilOffset = isType(dataSectionValue, String) ? cursor + Buffer.from(dataSectionValue, 'hex').length : cursor;
 		switch (dataSectionType) {
 			case 'subfile':
 				offsets[dataSectionLength] = subfiles[dataSectionKey]?.length ?? 0;
