@@ -54,3 +54,7 @@ export const userApprovesOverwrite = (filenames, description, yOverride) => {
 		? keyInYN(`WARNING: The following ${description ? `${description} ` : ''} file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:\n${filesToBeOverwritten.join('\n')}\nIs this OK? (this can be overridden with the "-y" option)`)
 		: true;
 };
+
+export const handleDataSectionOddity = (message) => {
+	console.warn(`WARNING: ${message}; this will not be reflected when rebuilding!`);
+};

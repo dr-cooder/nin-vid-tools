@@ -5,6 +5,7 @@ import path from 'path';
 // import { fileURLToPath } from 'url';
 import {
 	UINT_LENGTHS,
+	AD_COUNT_OFFSET,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
 	metadataFilename,
@@ -17,7 +18,8 @@ import {
 	arrayOfEmptyObjects,
 	readFromFileIfItExists,
 	isType,
-	userApprovesOverwrite
+	userApprovesOverwrite,
+	handleDataSectionOddity
 } from './helpers.js';
 // import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
 
@@ -30,10 +32,14 @@ const readDataSection = (buffer, cursor, { type, length, format, key, until }) =
 		: (format == null ? { length } : { value: buffer[`readUint${format}`](cursor), length: UINT_LENGTHS[format] }))
 });
 
-const extractFromBuffer = ({ buffer, dataSections, offsets, metadata, subfiles }) => { // TODO: make this a pure function; don't mutate the last 3 params
-	let adCount;
-	let adsOffsets;
+const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, subfiles }) => { // TODO: make this a pure function; don't mutate the last 3 params
 	let cursor = 0;
+	let adsOffsets;
+	if (adCount !== undefined) {
+		metadata.ads = arrayOfEmptyObjects(adCount);
+		subfiles.ads = arrayOfEmptyObjects(adCount);
+		adsOffsets = arrayOfEmptyObjects(adCount);
+	}
 
 	for (const dataSection of dataSections) {
 		const {
@@ -43,59 +49,58 @@ const extractFromBuffer = ({ buffer, dataSections, offsets, metadata, subfiles }
 			value: dataSectionValue,
 			length: dataSectionLength
 		} = readDataSection(buffer, cursor, dataSection);
-		const cursorAfterOffset = cursor + offsets[dataSectionLength];
-		const untilOffset = dataSectionType === 'leftoverData'
-			? (dataSectionUntil == null
+		if (dataSectionType === 'trailingZeros') {
+			const untilOffset = dataSectionUntil === undefined
 				? (adCount
 					? adsOffsets[0].fileStartToAdStart
 					: buffer.length)
-				: offsets[dataSectionUntil])
-			: undefined;
-		switch (dataSectionType) {
-			case 'offset':
-				offsets[dataSectionKey] = dataSectionValue;
-				cursor += dataSectionLength;
-				break;
-			case 'meta':
-				setValue(metadata, dataSectionKey, dataSectionValue);
-				cursor += dataSectionLength;
-				break;
-			case 'adCount':
-				adCount = dataSectionValue;
-				metadata.ads = arrayOfEmptyObjects(adCount);
-				subfiles.ads = arrayOfEmptyObjects(adCount);
-				adsOffsets = arrayOfEmptyObjects(adCount);
-				cursor += dataSectionLength;
-				break;
-			case 'adOffsets':
-				for (let i = 0; i < adCount; i++) {
-					adsOffsets[i][dataSectionKey] = i ? readDataSection(buffer, cursor, dataSection).value : dataSectionValue;
-					cursor += dataSectionLength;
+				: offsets[dataSectionUntil];
+			if (untilOffset < cursor) {
+				throw new Error(`"until" prop of "${dataSectionKey}" (${dataSectionUntil == null ? 'start of first ad' : `"${dataSectionUntil}"`}, which is ${untilOffset}) is before the cursor (${cursor})`);
+			} else {
+				const trailingZerosString = untilOffset !== undefined && buffer.subarray(cursor, untilOffset).toString('hex');
+				if (/^(0{2})*$/.test(trailingZerosString)) {
+					setValue(metadata, dataSectionKey, untilOffset - cursor);
+				} else {
+					handleDataSectionOddity(`The leftover data leading up to "${dataSectionUntil}" (${trailingZerosString}) is not all zero bytes`);
 				}
-				break;
-			case 'adMetas':
-				for (let i = 0; i < adCount; i++) {
-					setValue(metadata.ads[i], dataSectionKey, i ? readDataSection(buffer, cursor, dataSection).value : dataSectionValue);
-					cursor += dataSectionLength;
-				}
-				break;
-			case 'subfile':
-				subfiles[dataSectionKey] = buffer.subarray(cursor, cursorAfterOffset);
-				cursor = cursorAfterOffset;
-				break;
-			case 'leftoverData':
-				if (untilOffset < cursor) {
-					throw new Error(`"until" prop of "${dataSectionKey}" (${dataSectionUntil == null ? 'start of first ad' : `"${dataSectionUntil}"`}, which is ${untilOffset}) is before the cursor (${cursor})!`);
-				}
-				setValue(metadata, dataSectionKey, buffer.subarray(cursor, untilOffset).toString('hex'));
 				cursor = untilOffset;
-				break;
-			default:
-				throw new Error(`"${dataSectionType}" is not a valid data section type!`);
+			}
+		} else {
+			const cursorAfterOffset = cursor + offsets[dataSectionLength];
+			switch (dataSectionType) {
+				case 'offset':
+					offsets[dataSectionKey] = dataSectionValue;
+					cursor += dataSectionLength;
+					break;
+				case 'meta':
+					setValue(metadata, dataSectionKey, dataSectionValue); // TODO: handle mismatches (only case being ad ID)
+					cursor += dataSectionLength;
+					break;
+				case 'adOffsets':
+					for (let i = 0; i < adCount; i++) {
+						adsOffsets[i][dataSectionKey] = i ? readDataSection(buffer, cursor, dataSection).value : dataSectionValue;
+						cursor += dataSectionLength;
+					}
+					break;
+				case 'adMetas':
+					for (let i = 0; i < adCount; i++) {
+						setValue(metadata.ads[i], dataSectionKey, i ? readDataSection(buffer, cursor, dataSection).value : dataSectionValue);
+						cursor += dataSectionLength;
+					}
+					break;
+				case 'subfile':
+					subfiles[dataSectionKey] = buffer.subarray(cursor, cursorAfterOffset);
+					cursor = cursorAfterOffset;
+					break;
+				case 'constant':
+					break;
+				default:
+			}
 		}
 	}
 
-	return { adCount, adsOffsets };
+	return { adsOffsets };
 };
 
 const extractDecrypted = (inFileDataDecrypted) => {
@@ -103,7 +108,10 @@ const extractDecrypted = (inFileDataDecrypted) => {
 	const metadata = {};
 	const subfiles = {};
 
-	const { adCount, adsOffsets } = extractFromBuffer({
+	const adCount = inFileDataDecrypted.readUint8(AD_COUNT_OFFSET);
+
+	const { adsOffsets } = extractFromBuffer({
+		adCount,
 		buffer: inFileDataDecrypted,
 		dataSections: MAIN_DATA_SECTIONS,
 		offsets,
@@ -122,7 +130,7 @@ const extractDecrypted = (inFileDataDecrypted) => {
 				nextAdIndex == adCount
 					? inFileDataDecrypted.length
 					: adsOffsets[nextAdIndex].fileStartToAdStart
-				),
+			),
 			dataSections: AD_DATA_SECTIONS,
 			offsets: adOffsets,
 			metadata: adMetadata,
@@ -151,6 +159,7 @@ const readSubfiles = ({ subfileSpecs, filenameFunctionParams, missingSubfilename
 };
 
 const getOffsetsAndEnd = ({ dataSections, metadata, subfiles, adCount }) => {
+	const invalidTrailingZerosKeys = [];
 	const offsets = {};
 	let cursor = 0;
 	let end;
@@ -158,42 +167,45 @@ const getOffsetsAndEnd = ({ dataSections, metadata, subfiles, adCount }) => {
 	for (const dataSection of dataSections) {
 		const {
 			type: dataSectionType,
-			format: dataSectionFormat,
-			length: dataSectionLength,
-			key: dataSectionKey,
-			until: dataSectionUntil
+			key: dataSectionKey
 		} = dataSection;
-		const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : UINT_LENGTHS[dataSectionFormat];
-		const dataSectionValue = getValue(metadata, dataSectionKey);
-		const untilOffset = isType(dataSectionValue, String) ? cursor + Buffer.from(dataSectionValue, 'hex').length : cursor;
-		switch (dataSectionType) {
-			case 'subfile':
-				offsets[dataSectionLength] = subfiles[dataSectionKey]?.length ?? 0;
-				cursor += offsets[dataSectionLength];
-				break;
-			case 'leftoverData':
+		if (dataSectionType === 'trailingZeros') {
+			const dataSectionUntil = dataSection.until;
+			const untilOffset = cursor + getValue(metadata, dataSectionKey);
+			if (isNaN(untilOffset)) {
+				invalidTrailingZerosKeys.push(dataSectionKey);
+			} else {
 				if (dataSectionUntil == null) {
 					end = untilOffset;
 				} else {
 					offsets[dataSectionUntil] = untilOffset;
 				}
 				cursor = untilOffset;
-				break;
-			case 'adOffsets':
-			case 'adMetas':
-				cursor += dataSectionActualLength * adCount;
-				break;
-			default:
-				cursor += dataSectionActualLength;
+			}
+		} else {
+			const dataSectionLength = dataSection.length;
+			const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : UINT_LENGTHS[dataSection.format];
+			switch (dataSectionType) {
+				case 'subfile':
+					offsets[dataSectionLength] = subfiles[dataSectionKey]?.length ?? 0;
+					cursor += offsets[dataSectionLength];
+					break;
+				case 'adOffsets':
+				case 'adMetas':
+					cursor += dataSectionActualLength * adCount;
+					break;
+				default:
+					cursor += dataSectionActualLength;
+			}
 		}
 	}
 
-	return { offsets, end };
+	return { invalidTrailingZerosKeys, offsets, end };
 };
 
 const writeDataSection = (buffer, cursor, value, { length, format }) => {
 	if (value == null) {
-		throw new Error('Nullish values cannot be written to buffers');
+		throw new TypeError('Nullish values cannot be written to buffers');
 	}
 	let offset = 0;
 	if (isType(length, Number)) {
@@ -206,29 +218,25 @@ const writeDataSection = (buffer, cursor, value, { length, format }) => {
 	return offset;
 };
 
-// Here's where we accumulate missing keys
 const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metadata, subfiles }) => {
-	const adsMeta = metadata.ads;
-	const adCount = adsMeta?.length ?? 0;
+	const adsMetadata = metadata?.ads;
+	const adCount = adsMetadata?.length ?? 0;
 	const invalidMetadataKeys = [];
 	let cursor = 0;
 
 	for (const dataSection of dataSections) {
 		const {
 			type: dataSectionType,
-			key: dataSectionKey,
-			until: dataSectionUntil
+			key: dataSectionKey
 		} = dataSection;
 		try {
+			const valueFromMetadata = getValue(metadata, dataSectionKey);
 			switch (dataSectionType) {
 				case 'offset':
 					cursor += writeDataSection(buffer, cursor, mainOffsets[dataSectionKey], dataSection);
 					break;
 				case 'meta':
-					cursor += writeDataSection(buffer, cursor, getValue(metadata, dataSectionKey), dataSection);
-					break;
-				case 'adCount':
-					cursor += writeDataSection(buffer, cursor, adCount, dataSection);
+					cursor += writeDataSection(buffer, cursor, valueFromMetadata, dataSection);
 					break;
 				case 'adOffsets':
 					for (let i = 0; i < adCount; i++) {
@@ -237,21 +245,28 @@ const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metada
 					break;
 				case 'adMetas':
 					for (let i = 0; i < adCount; i++) {
-						cursor += writeDataSection(buffer, cursor, getValue(adsMeta?.[i] ?? {}, dataSectionKey), dataSection);
+						cursor += writeDataSection(buffer, cursor, getValue(adsMetadata?.[i] ?? {}, dataSectionKey), dataSection);
 					}
 					break;
 				case 'subfile':
 					subfiles[dataSectionKey]?.copy(buffer, cursor);
 					cursor += subfiles[dataSectionKey]?.length;
 					break;
-				case 'leftoverData':
-					cursor += writeDataSection(buffer, cursor, getValue(metadata, dataSectionKey), { length: mainOffsets[dataSectionUntil] - cursor, format: 'hex' });
+				case 'trailingZeros':
+					if (isType(valueFromMetadata, Number)) {
+						cursor += valueFromMetadata;
+					}
+					break;
+				case 'constant':
 					break;
 				default:
-					throw new Error(`"${dataSectionType}" is not a valid data section type!`); // TODO: Don't catch this error
 			}
 		} catch (error) {
-			invalidMetadataKeys.push(dataSectionKey);
+			if (isType(error, TypeError)) {
+				invalidMetadataKeys.push(dataSectionKey);
+			} else {
+				throw error;
+			}
 		}
 	}
 
@@ -267,7 +282,7 @@ const rebuildDecrypted = (outFilename, yOverride) => {
 	const metadataData = readFromFileIfItExists(outMetadataFilename);
 	let metadata;
 	let adsMetadata;
-	let adCount;
+	let adCount = 0;
 	let adsSubfiles;
 
 	if (metadataData === undefined) {
@@ -314,6 +329,7 @@ const rebuildDecrypted = (outFilename, yOverride) => {
 		console.log(`The following file has JSON syntax errors:\n${outMetadataFilename}`);
 	} else {
 		const {
+			invalidTrailingZerosKeys: mainInvalidTrailingZerosDataKeys,
 			offsets: mainOffsets,
 			end: mainEnd
 		} = getOffsetsAndEnd({
@@ -322,10 +338,12 @@ const rebuildDecrypted = (outFilename, yOverride) => {
 			subfiles: mainSubfiles,
 			adCount
 		});
+		invalidMetadataKeys.push(...mainInvalidTrailingZerosDataKeys);
 		const adsOffsets = [];
 		let fullBufferLength = mainEnd;
 		for (let adIndex = 0; adIndex < adCount; adIndex++) {
 			const {
+				invalidTrailingZerosKeys: adInvalidTrailingZerosKeys,
 				offsets: adOffsets,
 				end: adEnd
 			} = getOffsetsAndEnd({
@@ -333,6 +351,7 @@ const rebuildDecrypted = (outFilename, yOverride) => {
 				metadata: adsMetadata[adIndex],
 				subfiles: adsSubfiles[adIndex]
 			});
+			invalidMetadataKeys.push(...adInvalidTrailingZerosKeys.map(invalidTrailingZeroKey => `ads.${adIndex}.${invalidTrailingZeroKey}`)); // TODO: DRY
 			adsOffsets[adIndex] = { ...adOffsets, fileStartToAdStart: fullBufferLength };
 			fullBufferLength += adEnd;
 		}
