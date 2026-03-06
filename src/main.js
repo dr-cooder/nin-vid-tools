@@ -8,6 +8,7 @@ import {
 	AD_COUNT_OFFSET,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
+	getConstantValue,
 	metadataFilename,
 	MAIN_SUBFILES,
 	AD_SUBFILES
@@ -42,14 +43,13 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
 	}
 
 	for (const dataSection of dataSections) {
+		const dataSectionReadResult = readDataSection(buffer, cursor, dataSection);
 		const {
 			type: dataSectionType,
-			key: dataSectionKey,
-			until: dataSectionUntil,
-			value: dataSectionValue,
-			length: dataSectionLength
-		} = readDataSection(buffer, cursor, dataSection);
+			key: dataSectionKey
+		} = dataSectionReadResult;
 		if (dataSectionType === 'trailingZeros') {
+			const dataSectionUntil = dataSectionReadResult.until;
 			const untilOffset = dataSectionUntil === undefined
 				? (adCount
 					? adsOffsets[0].fileStartToAdStart
@@ -67,14 +67,24 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
 				cursor = untilOffset;
 			}
 		} else {
+			const {
+				value: dataSectionValue,
+				length: dataSectionLength
+			} = dataSectionReadResult;
 			const cursorAfterOffset = cursor + offsets[dataSectionLength];
+			const constantValue = getConstantValue({ adCount, dataSection });
+			const previousMetaValue = getValue(metadata, dataSectionKey);
 			switch (dataSectionType) {
 				case 'offset':
 					offsets[dataSectionKey] = dataSectionValue;
 					cursor += dataSectionLength;
 					break;
 				case 'meta':
-					setValue(metadata, dataSectionKey, dataSectionValue); // TODO: handle mismatches (only case being ad ID)
+					if (previousMetaValue === undefined) {
+						setValue(metadata, dataSectionKey, dataSectionValue);
+					} else if (previousMetaValue !== dataSectionValue) {
+						handleDataSectionOddity(`Ad metadata key "${dataSectionKey}" has value "${previousMetaValue}" in the first position and value "${dataSectionValue}" in the second position`);
+					} // TODO: note ad index
 					cursor += dataSectionLength;
 					break;
 				case 'adOffsets':
@@ -94,6 +104,12 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
 					cursor = cursorAfterOffset;
 					break;
 				case 'constant':
+					if (dataSectionValue !== constantValue) {
+						handleDataSectionOddity(`The data section at offset 0x${cursor.toString(16)} was expected to be ${constantValue} but was ${dataSectionValue}`);
+						// TODO: when extracting from an ad, the cursor should not be displayed as relative
+						// TODO: print as hex buffer, not number
+					}
+					cursor += dataSectionLength;
 					break;
 				default:
 			}
@@ -254,10 +270,11 @@ const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metada
 					break;
 				case 'trailingZeros':
 					if (isType(valueFromMetadata, Number)) {
-						cursor += valueFromMetadata;
+						cursor += valueFromMetadata; // Assumes bytes being skipped over are already all zero
 					}
 					break;
 				case 'constant':
+					cursor += writeDataSection(buffer, cursor, getConstantValue({ adCount, dataSection }), dataSection);
 					break;
 				default:
 			}
@@ -413,7 +430,7 @@ if (extractMode) {
 	const inFileData = fs.readFileSync(inFilePathFull);
 	const { metadata, subfiles } = extractDecrypted(inFileData);
 
-	fs.writeFileSync(metadataFilename(outFilePathFull), JSON.stringify(metadata, null, '\t')); // TODO: Alphabetize?
+	fs.writeFileSync(metadataFilename(outFilePathFull), JSON.stringify(metadata, null, '\t'));
 	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), subfiles[key]));
 	subfiles.ads.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull, i), adSubfiles[key])));
 } else {

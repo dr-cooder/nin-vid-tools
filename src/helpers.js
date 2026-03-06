@@ -3,6 +3,8 @@ import { keyInYN } from 'readline-sync';
 
 const DELIMITER = '.';
 
+// TODO: flatten and unflatten metadata only when reading and writing, respectively
+// https://www.30secondsofcode.org/js/s/flatten-unflatten-object
 export const getValue = (object, path) =>
 	path == null
 		? object
