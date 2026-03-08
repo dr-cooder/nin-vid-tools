@@ -3,6 +3,7 @@ import {
 	AD_COUNT_OFFSET,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
+	adInvalidMetdataKeyMapFn,
 	getConstantValue
 } from './constants.js';
 import {
@@ -12,39 +13,39 @@ import {
 	handleDataSectionOddity
 } from './helpers.js';
 
-const readDataSection = (buffer, cursor, { type, length, format, key, until }) => ({
-	type, key, until, format, ...(isType(length, Number) // Only subfiles have variable length, not metadata
+const readDataSection = (buffer, cursor, { length, format }) => ({
+	format, ...(isType(length, Number) // Only subfiles have variable length, not metadata
 		? { value: buffer.subarray(cursor, cursor + length).toString(format).replace(/[\0]+$/, ''), length }
 		: (format == null ? { length } : { value: buffer[`readUint${format}`](cursor), length: UINT_LENGTHS[format] }))
 });
 
-const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, subfiles }) => { // TODO: make this a pure function; don't mutate the last 3 params
+const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, bufferEnd = buffer.length, dataSections, offsets, metadata, subfiles }) => { // TODO: make this a pure function; don't mutate the last 3 params
 	const adsMetadata = arrayOfEmptyObjects(adCount);
 	const adsOffsets = arrayOfEmptyObjects(adCount);
 	const adsSubfiles = arrayOfEmptyObjects(adCount);
-	let cursor = 0;
+	let cursor = bufferStart;
 
 	for (const dataSection of dataSections) {
-		const dataSectionReadResult = readDataSection(buffer, cursor, dataSection);
 		const {
 			type: dataSectionType,
 			key: dataSectionKey
-		} = dataSectionReadResult;
+		} = dataSection;
+		const dataSectionReadResult = readDataSection(buffer, cursor, dataSection);
 		if (dataSectionType === 'trailingZeros') {
-			const dataSectionUntil = dataSectionReadResult.until;
+			const dataSectionUntil = dataSection.until;
 			const untilOffset = dataSectionUntil === undefined
 				? (adCount
 					? adsOffsets[0].fileStartToAdStart
-					: buffer.length)
+					: bufferEnd)
 				: offsets[dataSectionUntil];
 			if (untilOffset < cursor) {
-				throw new Error(`"until" prop of "${dataSectionKey}" (${dataSectionUntil == null ? 'start of first ad' : `"${dataSectionUntil}"`}, which is ${untilOffset}) is before the cursor (${cursor})`);
+				throw new Error(`"until" prop of ${JSON.stringify(dataSectionKey)} (${dataSectionUntil == null ? 'start of first ad' : JSON.stringify(dataSectionUntil)}, which is 0x${untilOffset.toString(16)}) is before the cursor (0x${cursor.toString(16)})`);
 			} else {
 				const trailingZerosString = untilOffset !== undefined && buffer.subarray(cursor, untilOffset).toString('hex');
 				if (/^(0{2})*$/.test(trailingZerosString)) {
 					metadata[dataSectionKey] = untilOffset - cursor;
 				} else {
-					handleDataSectionOddity(`The leftover data leading up to "${dataSectionUntil}" (${trailingZerosString}) is not all zero bytes`);
+					handleDataSectionOddity(`The leftover data leading up to ${JSON.stringify(dataSectionUntil)} (${trailingZerosString}) is not all zero bytes`); // TODO: specify data
 				}
 				cursor = untilOffset;
 			}
@@ -65,8 +66,8 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
 					if (previousMetaValue === undefined) {
 						metadata[dataSectionKey] = dataSectionValue;
 					} else if (previousMetaValue !== dataSectionValue) {
-						handleDataSectionOddity(`Ad metadata key "${dataSectionKey}" has value "${previousMetaValue}" in the first position and value "${dataSectionValue}" in the second position`);
-					} // TODO: note ad index
+						handleDataSectionOddity(`Metadata key ${JSON.stringify(adMetadataKeyFn?.(dataSectionKey))} has value ${JSON.stringify(previousMetaValue)} in the first position and value ${JSON.stringify(dataSectionValue)} in the second position`);
+					}
 					cursor += dataSectionLength;
 					break;
 				case 'adOffsets':
@@ -87,9 +88,8 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
 					break;
 				case 'constant':
 					if (dataSectionValue !== constantValue) {
-						handleDataSectionOddity(`The data section at offset 0x${cursor.toString(16)} was expected to be ${constantValue} but was ${dataSectionValue}`);
-						// TODO: when extracting from an ad, the cursor should not be displayed as relative
-						// TODO: print as hex buffer, not number (this is a problem in other error messages too)
+						handleDataSectionOddity(`The data section at offset 0x${cursor.toString(16)} was expected to be ${constantValue} but was ${buffer.subarray(cursor, cursor + dataSectionLength).toString('hex')}`);
+						// TODO: print expected as hex buffer, not number
 					}
 					cursor += dataSectionLength;
 					break;
@@ -121,12 +121,12 @@ export const extractDecrypted = (inFileDataDecrypted) => {
 		const adOffsets = adsOffsets[adIndex];
 		const nextAdIndex = adIndex + 1;
 		extractFromBuffer({
-			buffer: inFileDataDecrypted.subarray(
-				adOffsets.fileStartToAdStart,
-				nextAdIndex == adCount
-					? inFileDataDecrypted.length
-					: adsOffsets[nextAdIndex].fileStartToAdStart
-			),
+			adMetadataKeyFn: adInvalidMetdataKeyMapFn(adIndex),
+			buffer: inFileDataDecrypted,
+			bufferStart: adOffsets.fileStartToAdStart,
+			bufferEnd: nextAdIndex == adCount
+				? undefined
+				: adsOffsets[nextAdIndex].fileStartToAdStart,
 			dataSections: AD_DATA_SECTIONS,
 			offsets: adOffsets,
 			metadata: adsMetadata[adIndex],

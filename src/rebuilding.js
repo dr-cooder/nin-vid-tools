@@ -1,20 +1,19 @@
-import fs from 'fs';
-// import { fileURLToPath } from 'url';
 import {
 	UINT_LENGTHS,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
 	adInvalidMetdataKeyMapFn,
-	getConstantValue,
+	getConstantValue
+} from './constants.js';
+import {
 	metadataFilename,
 	MAIN_SUBFILES,
 	AD_SUBFILES
-} from './constants.js';
+} from './main.js';
 import {
 	flattenObject,
 	readFromFileIfItExists,
-	isType,
-	userApprovesOverwrite
+	isType
 } from './helpers.js';
 
 const readSubfiles = ({ subfileSpecs, filenameFunctionParams, missingSubfilenameCallback }) => {
@@ -153,9 +152,9 @@ const rebuildToBuffer = ({ buffer, dataSections, adCount, mainOffsets, adsOffset
 	return invalidMetadataKeys;
 };
 
-export const rebuildDecrypted = (outFilename, yOverride) => {
+export const rebuildDecrypted = (outFilename) => { // TODO: This function should not search for filenames itself, instead taking in metadata and buffer dictionaries as arguments
 	const missingSubfilenames = [];
-	const invalidMetadataKeys = []; // TODO: Make this a set, not a list
+	const invalidMetadataKeys = [];
 	let metadataHasSyntaxErrors = false;
 
 	const outMetadataFilename = metadataFilename(outFilename);
@@ -263,14 +262,11 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 				subfiles: adsSubfiles[adIndex]
 			}).map(adInvalidMetdataKeyMapFn(adIndex)));
 		}
-		const invalidMetadataKeyCount = invalidMetadataKeys.length;
-		if (invalidMetadataKeyCount) {
-			console.log(`The following metadata key${invalidMetadataKeyCount === 1 ? ' is' : 's are'} missing or of the wrong data type:\n${invalidMetadataKeys.join('\n')}`);
-		} else {
-			// TODO: This function should simply return a buffer, with file writing taking place outside
-			if (userApprovesOverwrite([outFilename], 'decrypted', yOverride)) {
-				fs.writeFileSync(outFilename, outBuffer);
-			}
+		const invalidMetadataUniqueKeys = [...new Set(invalidMetadataKeys)];
+		const invalidMetadataUniqueKeyCount = invalidMetadataUniqueKeys.length;
+		if (invalidMetadataUniqueKeyCount) {
+			throw new TypeError(`The following metadata key${invalidMetadataUniqueKeyCount === 1 ? ' is' : 's are'} missing or of the wrong data type:\n${invalidMetadataUniqueKeys.join('\n')}`);
 		}
+		return outBuffer;
 	}
 };

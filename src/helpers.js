@@ -1,5 +1,4 @@
 import fs from 'fs';
-import { keyInYN } from 'readline-sync';
 
 const DELIMITER = '.';
 
@@ -52,19 +51,6 @@ export const readFromFileIfItExists = (filename) => {
 	return data;
 };
 
-export const userApprovesOverwrite = (filenames, description, yOverride) => {
-	if (yOverride) {
-		return true;
-	}
-
-	const filesToBeOverwritten = filenames.filter(filename => fs.existsSync(filename));
-	const filesToBeOverwrittenCount = filesToBeOverwritten.length;
-
-	return filesToBeOverwrittenCount
-		? keyInYN(`WARNING: The following ${description ? `${description} ` : ''} file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:\n${filesToBeOverwritten.join('\n')}\nIs this OK? (this can be overridden with the "-y" option)`)
-		: true;
-};
-
-export const handleDataSectionOddity = (message) => {
+export const handleDataSectionOddity = (message) => { // TODO: Take a logger function
 	console.warn(`WARNING: ${message}; this will not be reflected when rebuilding!`);
 };

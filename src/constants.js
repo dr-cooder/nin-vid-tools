@@ -62,14 +62,3 @@ export const AD_DATA_SECTIONS = [
 export const adInvalidMetdataKeyMapFn = adIndex => invalidMetadataKey => `ads[${adIndex}].${invalidMetadataKey}`;
 
 export const getConstantValue = ({ adCount = 0, dataSection: { adCountMultiplier = 0, addend = 0 } }) => adCountMultiplier * adCount + addend;
-
-export const metadataFilename = filename => `${filename}.meta.json`;
-
-export const MAIN_SUBFILES = [
-	{ key: 'video', filename: filename => `${filename}.video.moflex` },
-	{ key: 'thumbnail', filename: filename => `${filename}.thumb.jpg` }
-];
-
-export const AD_SUBFILES = [
-	{ key: 'image', filename: (filename, index) => `${filename}.ad${index + 1}.jpg` }
-];
