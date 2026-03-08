@@ -4,13 +4,14 @@ import {
 	UINT_LENGTHS,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
+	adInvalidMetdataKeyMapFn,
 	getConstantValue,
 	metadataFilename,
 	MAIN_SUBFILES,
 	AD_SUBFILES
 } from './constants.js';
 import {
-	getValue,
+	flattenObject,
 	readFromFileIfItExists,
 	isType,
 	userApprovesOverwrite
@@ -43,7 +44,7 @@ const getOffsetsAndEnd = ({ dataSections, metadata, subfiles, adCount }) => {
 		} = dataSection;
 		if (dataSectionType === 'trailingZeros') {
 			const dataSectionUntil = dataSection.until;
-			const untilOffset = cursor + getValue(metadata, dataSectionKey);
+			const untilOffset = cursor + metadata[dataSectionKey];
 			if (isNaN(untilOffset)) {
 				invalidTrailingZerosKeys.push(dataSectionKey);
 			} else {
@@ -90,9 +91,7 @@ const writeDataSection = (buffer, cursor, value, { length, format }) => {
 	return offset;
 };
 
-const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metadata, subfiles }) => {
-	const adsMetadata = metadata?.ads;
-	const adCount = adsMetadata?.length ?? 0;
+const rebuildToBuffer = ({ buffer, dataSections, adCount, mainOffsets, adsOffsets, mainMetadata, adsMetadata, subfiles }) => {
 	const invalidMetadataKeys = [];
 	let cursor = 0;
 
@@ -102,7 +101,7 @@ const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metada
 			key: dataSectionKey
 		} = dataSection;
 		try {
-			const valueFromMetadata = getValue(metadata, dataSectionKey);
+			const valueFromMetadata = mainMetadata[dataSectionKey];
 			switch (dataSectionType) {
 				case 'offset':
 					cursor += writeDataSection(buffer, cursor, mainOffsets[dataSectionKey], dataSection);
@@ -117,7 +116,15 @@ const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metada
 					break;
 				case 'adMetas':
 					for (let i = 0; i < adCount; i++) {
-						cursor += writeDataSection(buffer, cursor, getValue(adsMetadata?.[i] ?? {}, dataSectionKey), dataSection);
+						try {
+							cursor += writeDataSection(buffer, cursor, adsMetadata[i][dataSectionKey], dataSection);
+						} catch (error) { // TODO: DRY
+							if (isType(error, TypeError)) {
+								invalidMetadataKeys.push(adInvalidMetdataKeyMapFn(i)(dataSectionKey));
+							} else {
+								throw error;
+							}
+						}
 					}
 					break;
 				case 'subfile':
@@ -148,21 +155,21 @@ const rebuildToBuffer = ({ buffer, dataSections, mainOffsets, adsOffsets, metada
 
 export const rebuildDecrypted = (outFilename, yOverride) => {
 	const missingSubfilenames = [];
-	const invalidMetadataKeys = [];
+	const invalidMetadataKeys = []; // TODO: Make this a set, not a list
 	let metadataHasSyntaxErrors = false;
 
 	const outMetadataFilename = metadataFilename(outFilename);
 	const metadataData = readFromFileIfItExists(outMetadataFilename);
-	let metadata;
-	let adsMetadata;
+	let mainMetadata;
+	let adsMetadata = [];
 	let adCount = 0;
-	let adsSubfiles;
+	let adsSubfiles = [];
 
 	if (metadataData === undefined) {
 		missingSubfilenames.push(outMetadataFilename);
 	} else {
 		try {
-			metadata = JSON.parse(metadataData);
+			mainMetadata = JSON.parse(metadataData);
 		} catch (jsonParseError) {
 			if (isType(jsonParseError, SyntaxError)) {
 				metadataHasSyntaxErrors = true;
@@ -170,9 +177,12 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 				throw jsonParseError;
 			}
 		}
-		adsMetadata = getValue(metadata, 'ads');
+		adsMetadata = mainMetadata?.ads;
+		delete mainMetadata?.ads;
+		mainMetadata = flattenObject(mainMetadata);
 		if (isType(adsMetadata, Array)) {
 			adCount = adsMetadata.length;
+			adsMetadata = adsMetadata.map(flattenObject);
 			adsSubfiles = [...Array(adCount).keys().map(i => readSubfiles({
 				subfileSpecs: AD_SUBFILES,
 				filenameFunctionParams: [outFilename, i],
@@ -181,6 +191,7 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 				}
 			}))];
 		} else {
+			adsMetadata = [];
 			invalidMetadataKeys.push('ads');
 		}
 	}
@@ -207,7 +218,7 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 			end: mainEnd
 		} = getOffsetsAndEnd({
 			dataSections: MAIN_DATA_SECTIONS,
-			metadata,
+			metadata: mainMetadata,
 			subfiles: mainSubfiles,
 			adCount
 		});
@@ -224,7 +235,7 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 				metadata: adsMetadata[adIndex],
 				subfiles: adsSubfiles[adIndex]
 			});
-			invalidMetadataKeys.push(...adInvalidTrailingZerosKeys.map(invalidTrailingZeroKey => `ads.${adIndex}.${invalidTrailingZeroKey}`)); // TODO: DRY
+			invalidMetadataKeys.push(...adInvalidTrailingZerosKeys.map(adInvalidMetdataKeyMapFn(adIndex)));
 			adsOffsets[adIndex] = { ...adOffsets, fileStartToAdStart: fullBufferLength };
 			fullBufferLength += adEnd;
 		}
@@ -232,9 +243,11 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 		invalidMetadataKeys.push(...rebuildToBuffer({
 			buffer: outBuffer,
 			dataSections: MAIN_DATA_SECTIONS,
+			adCount,
 			mainOffsets,
 			adsOffsets,
-			metadata,
+			mainMetadata,
+			adsMetadata,
 			subfiles: mainSubfiles
 		}));
 		for (let adIndex = 0; adIndex < adCount; adIndex++) {
@@ -242,11 +255,13 @@ export const rebuildDecrypted = (outFilename, yOverride) => {
 			invalidMetadataKeys.push(...rebuildToBuffer({
 				buffer: outBuffer.subarray(adOffsets.fileStartToAdStart),
 				dataSections: AD_DATA_SECTIONS,
+				adCount,
 				mainOffsets: adOffsets,
 				adsOffsets: [],
-				metadata: adsMetadata[adIndex],
+				mainMetadata: adsMetadata[adIndex],
+				adsMetadata: [],
 				subfiles: adsSubfiles[adIndex]
-			}).map(invalidMetadataKey => `ads.${adIndex}.${invalidMetadataKey}`));
+			}).map(adInvalidMetdataKeyMapFn(adIndex)));
 		}
 		const invalidMetadataKeyCount = invalidMetadataKeys.length;
 		if (invalidMetadataKeyCount) {

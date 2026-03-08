@@ -36,11 +36,11 @@ switch (extractOrRebuild) {
 if (extractMode) {
 	const outFilePathFull = inFilePathFull;
 	const inFileData = fs.readFileSync(inFilePathFull);
-	const { metadata, subfiles } = extractDecrypted(inFileData);
+	const { metadata, mainSubfiles, adsSubfiles } = extractDecrypted(inFileData);
 
 	fs.writeFileSync(metadataFilename(outFilePathFull), JSON.stringify(metadata, null, '\t'));
-	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), subfiles[key]));
-	subfiles.ads.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull, i), adSubfiles[key])));
+	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), mainSubfiles[key]));
+	adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull, i), adSubfiles[key])));
 } else {
 	rebuildDecrypted(inFilePathFull);
 }

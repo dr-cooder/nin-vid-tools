@@ -59,6 +59,8 @@ export const AD_DATA_SECTIONS = [
 	{ type: 'trailingZeros', key: 'trailingZeros.image' }
 ];
 
+export const adInvalidMetdataKeyMapFn = adIndex => invalidMetadataKey => `ads[${adIndex}].${invalidMetadataKey}`;
+
 export const getConstantValue = ({ adCount = 0, dataSection: { adCountMultiplier = 0, addend = 0 } }) => adCountMultiplier * adCount + addend;
 
 export const metadataFilename = filename => `${filename}.meta.json`;

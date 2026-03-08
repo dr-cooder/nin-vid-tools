@@ -6,10 +6,9 @@ import {
 	getConstantValue
 } from './constants.js';
 import {
-	getValue,
-	setValue,
-	arrayOfEmptyObjects,
 	isType,
+    unflattenObject,
+	arrayOfEmptyObjects,
 	handleDataSectionOddity
 } from './helpers.js';
 
@@ -20,13 +19,10 @@ const readDataSection = (buffer, cursor, { type, length, format, key, until }) =
 });
 
 const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, subfiles }) => { // TODO: make this a pure function; don't mutate the last 3 params
+    const adsMetadata = arrayOfEmptyObjects(adCount);
+    const adsOffsets = arrayOfEmptyObjects(adCount);
+    const adsSubfiles = arrayOfEmptyObjects(adCount);
     let cursor = 0;
-    let adsOffsets;
-    if (adCount !== undefined) {
-        metadata.ads = arrayOfEmptyObjects(adCount);
-        subfiles.ads = arrayOfEmptyObjects(adCount);
-        adsOffsets = arrayOfEmptyObjects(adCount);
-    }
 
     for (const dataSection of dataSections) {
         const dataSectionReadResult = readDataSection(buffer, cursor, dataSection);
@@ -46,7 +42,7 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
             } else {
                 const trailingZerosString = untilOffset !== undefined && buffer.subarray(cursor, untilOffset).toString('hex');
                 if (/^(0{2})*$/.test(trailingZerosString)) {
-                    setValue(metadata, dataSectionKey, untilOffset - cursor);
+                    metadata[dataSectionKey] = untilOffset - cursor;
                 } else {
                     handleDataSectionOddity(`The leftover data leading up to "${dataSectionUntil}" (${trailingZerosString}) is not all zero bytes`);
                 }
@@ -59,7 +55,7 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
             } = dataSectionReadResult;
             const cursorAfterOffset = cursor + offsets[dataSectionLength];
             const constantValue = getConstantValue({ adCount, dataSection });
-            const previousMetaValue = getValue(metadata, dataSectionKey);
+            const previousMetaValue = metadata[dataSectionKey];
             switch (dataSectionType) {
                 case 'offset':
                     offsets[dataSectionKey] = dataSectionValue;
@@ -67,7 +63,7 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
                     break;
                 case 'meta':
                     if (previousMetaValue === undefined) {
-                        setValue(metadata, dataSectionKey, dataSectionValue);
+                        metadata[dataSectionKey] = dataSectionValue;
                     } else if (previousMetaValue !== dataSectionValue) {
                         handleDataSectionOddity(`Ad metadata key "${dataSectionKey}" has value "${previousMetaValue}" in the first position and value "${dataSectionValue}" in the second position`);
                     } // TODO: note ad index
@@ -81,7 +77,7 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
                     break;
                 case 'adMetas':
                     for (let i = 0; i < adCount; i++) {
-                        setValue(metadata.ads[i], dataSectionKey, i ? readDataSection(buffer, cursor, dataSection).value : dataSectionValue);
+                        adsMetadata[i][dataSectionKey] = i ? readDataSection(buffer, cursor, dataSection).value : dataSectionValue;
                         cursor += dataSectionLength;
                     }
                     break;
@@ -102,29 +98,27 @@ const extractFromBuffer = ({ adCount, buffer, dataSections, offsets, metadata, s
         }
     }
 
-    return { adsOffsets };
+    return { adsMetadata, adsOffsets, adsSubfiles };
 };
 
 export const extractDecrypted = (inFileDataDecrypted) => {
     const offsets = {};
-    const metadata = {};
-    const subfiles = {};
+    const mainMetadata = {};
+    const mainSubfiles = {};
 
     const adCount = inFileDataDecrypted.readUint8(AD_COUNT_OFFSET);
 
-    const { adsOffsets } = extractFromBuffer({
+    const { adsOffsets, adsMetadata, adsSubfiles } = extractFromBuffer({
         adCount,
         buffer: inFileDataDecrypted,
         dataSections: MAIN_DATA_SECTIONS,
         offsets,
-        metadata,
-        subfiles
+        metadata: mainMetadata,
+        subfiles: mainSubfiles
     });
 
     for (let adIndex = 0; adIndex < adCount; adIndex++) {
         const adOffsets = adsOffsets[adIndex];
-        const adMetadata = metadata.ads[adIndex];
-        const adSubfiles = subfiles.ads[adIndex];
         const nextAdIndex = adIndex + 1;
         extractFromBuffer({
             buffer: inFileDataDecrypted.subarray(
@@ -135,10 +129,10 @@ export const extractDecrypted = (inFileDataDecrypted) => {
             ),
             dataSections: AD_DATA_SECTIONS,
             offsets: adOffsets,
-            metadata: adMetadata,
-            subfiles: adSubfiles
+            metadata: adsMetadata[adIndex],
+            subfiles: adsSubfiles[adIndex]
         });
     }
 
-    return { metadata, subfiles };
+    return { metadata: { ...unflattenObject(mainMetadata), ads: adsMetadata.map(unflattenObject) }, mainSubfiles, adsSubfiles };
 };

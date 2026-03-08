@@ -3,27 +3,40 @@ import { keyInYN } from 'readline-sync';
 
 const DELIMITER = '.';
 
-// TODO: flatten and unflatten metadata only when reading and writing, respectively
+export const isType = (object, type) =>
+	type == null
+		? object === type
+		: object != null && object.constructor === type;
+
 // https://www.30secondsofcode.org/js/s/flatten-unflatten-object
-export const getValue = (object, path) =>
-	path == null
-		? object
-		: path.split(DELIMITER).reduce((currentValue, key) => currentValue?.[key], object);
 
-const setValueRecursion = (object, keys, value) => {
-	const [currentKey, ...remainingKeys] = keys;
+export const flattenObject = (object, prefix = '') =>
+	Object.keys(object ?? {}).reduce((accumulator, key) => {
+		const accumulatedKey = prefix.length ? `${prefix}${DELIMITER}${key}` : key;
+		const objectValue = object[key];
+		if (
+			isType(objectValue, Object) &&
+			Object.keys(objectValue).length > 0
+		) {
+			Object.assign(accumulator, flattenObject(objectValue, accumulatedKey));
+		} else {
+			accumulator[accumulatedKey] = objectValue;
+		}
+		return accumulator;
+	}, {});
 
-	if (remainingKeys.length === 0) {
-		object[currentKey] = value;
-	} else {
-		object[currentKey] = object[currentKey] ?? {};
-		setValueRecursion(object[currentKey], remainingKeys, value);
-	}
-
-	return object;
-};
-
-export const setValue = (object, path, value) => setValueRecursion(object, path.split(DELIMITER), value);
+export const unflattenObject = object =>
+	Object.keys(object ?? {}).reduce((unflattenedObject, flatKey) => {
+		flatKey.split(DELIMITER).reduce(
+			(value, currentKey, keyDepth, keySequence) =>
+				value[currentKey] ||
+				(value[currentKey] = keySequence.length - 1 === keyDepth
+					? object[flatKey]
+					: {}),
+			unflattenedObject
+		);
+		return unflattenedObject;
+	}, {});
 
 export const arrayOfEmptyObjects = length => Array.from(Array(length), () => ({}));
 
@@ -38,11 +51,6 @@ export const readFromFileIfItExists = (filename) => {
 	}
 	return data;
 };
-
-export const isType = (object, type) =>
-	type == null
-		? object === type
-		: object != null && object.constructor === type;
 
 export const userApprovesOverwrite = (filenames, description, yOverride) => {
 	if (yOverride) {
