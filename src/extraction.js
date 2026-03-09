@@ -19,7 +19,7 @@ const readDataSection = (buffer, cursor, { length, format }) => ({
 		: (format == null ? { length } : { value: buffer[`readUint${format}`](cursor), length: UINT_LENGTHS[format] }))
 });
 
-const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, bufferEnd = buffer.length, dataSections }) => { // TODO: make this a pure function; don't mutate the last 3 params
+const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, bufferEnd = buffer.length, dataSections }) => {
 	const offsets = {};
 	const adStartOffsets = [];
 	const mainMetadata = {};
@@ -120,7 +120,7 @@ export const extractDecrypted = (inFileDataDecrypted) => {
 		} = extractFromBuffer({
 			adMetadataKeyFn: adInvalidMetdataKeyMapFn(adIndex),
 			buffer: inFileDataDecrypted,
-			bufferStart: adStartOffsets[adIndex], // TODO: There is only ever one relevant adOffset for the ensuing step; rework this as adStartOffsets and adStartOffset
+			bufferStart: adStartOffsets[adIndex],
 			bufferEnd: nextAdIndex == adCount
 				? undefined
 				: adStartOffsets[nextAdIndex],
