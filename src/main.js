@@ -4,10 +4,17 @@
 import fs from 'fs';
 import path from 'path';
 import { keyInYN } from 'readline-sync';
-// import { fileURLToPath } from 'url';
 import { extractDecrypted } from './extraction.js';
 import { rebuildDecrypted } from './rebuilding.js';
+import {
+	readFromFileIfItExists,
+	isType
+} from './helpers.js';
+
 // import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
+// import { fileURLToPath } from 'url';
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
 
 export const MAIN_SUBFILES = [
 	{ key: 'video', filename: filename => `${filename}.video.moflex` },
@@ -19,6 +26,20 @@ export const AD_SUBFILES = [
 ];
 
 export const metadataFilename = filename => `${filename}.meta.json`;
+
+const readSubfiles = ({ subfileSpecs, filenameFunctionParams, missingSubfilenameCallback }) => {
+	const subfiles = {};
+	for (const { key: subfileKey, filename: subfilenameFunction } of subfileSpecs) {
+		const subfilename = subfilenameFunction(...filenameFunctionParams);
+		const subfileData = readFromFileIfItExists(subfilename);
+		if (subfileData === undefined) {
+			missingSubfilenameCallback(subfilename);
+		} else {
+			subfiles[subfileKey] = subfileData;
+		}
+	}
+	return subfiles;
+};
 
 const userApprovesOverwrite = (filenames, description, yOverride) => {
 	if (yOverride) {
@@ -33,8 +54,6 @@ const userApprovesOverwrite = (filenames, description, yOverride) => {
 		: true;
 };
 
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
 const __cwd = process.cwd();
 if (process.argv.length <= 3) {
 	throw new Error('"extract"/"rebuild" and input file required');
@@ -63,8 +82,54 @@ if (extractMode) {
 	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), mainSubfiles[key]));
 	adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull, i), adSubfiles[key])));
 } else {
-	const builtBuffer = rebuildDecrypted(inFilePathFull);
-	if (userApprovesOverwrite([inFilePathFull], 'decrypted', false)) {
-		fs.writeFileSync(inFilePathFull, builtBuffer);
+	const missingSubfilenames = [];
+	let metadataHasSyntaxErrors = false;
+
+	const outMetadataFilename = metadataFilename(inFilePathFull);
+	const metadataData = readFromFileIfItExists(outMetadataFilename);
+	let metadata;
+
+	if (metadataData === undefined) {
+		missingSubfilenames.push(outMetadataFilename);
+	} else {
+		try {
+			metadata = JSON.parse(metadataData);
+		} catch (jsonParseError) {
+			if (isType(jsonParseError, SyntaxError)) {
+				metadataHasSyntaxErrors = true;
+			} else {
+				throw jsonParseError;
+			}
+		}
+	}
+
+	const mainSubfiles = readSubfiles({
+		subfileSpecs: MAIN_SUBFILES,
+		filenameFunctionParams: [inFilePathFull],
+		missingSubfilenameCallback: (subfilename) => {
+			missingSubfilenames.push(subfilename);
+		}
+	});
+
+	const adsSubfiles = [...Array(metadata?.ads?.length ?? 0).keys().map(i => readSubfiles({
+		subfileSpecs: AD_SUBFILES,
+		filenameFunctionParams: [inFilePathFull, i],
+		missingSubfilenameCallback: (subfilename) => {
+			missingSubfilenames.push(subfilename);
+		}
+	}))];
+
+	const missingSubfileCount = missingSubfilenames.length;
+	if (missingSubfileCount) {
+		console.log(`The following file${missingSubfileCount === 1 ? ' is' : 's are'} missing:\n${missingSubfilenames.join('\n')}`);
+	}
+
+	if (metadataHasSyntaxErrors) {
+		console.log(`The following file has JSON syntax errors:\n${outMetadataFilename}`);
+	} else {
+		const builtBuffer = rebuildDecrypted({ metadata, mainSubfiles, adsSubfiles });
+		if (userApprovesOverwrite([inFilePathFull], 'decrypted', false)) {
+			fs.writeFileSync(inFilePathFull, builtBuffer);
+		}
 	}
 }
