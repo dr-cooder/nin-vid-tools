@@ -6,15 +6,24 @@ import path from 'path';
 import { keyInYN } from 'readline-sync';
 import { extractDecrypted } from './extraction.js';
 import { rebuildDecrypted } from './rebuilding.js';
-import {
-	readFromFileIfItExists,
-	isType
-} from './helpers.js';
+import { isType } from './helpers.js';
 
 // import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
 // import { fileURLToPath } from 'url';
 // const __filename = fileURLToPath(import.meta.url);
 // const __dirname = path.dirname(__filename);
+
+export const readFromFileIfItExists = (filename) => {
+	let data;
+	try {
+		data = fs.readFileSync(filename);
+	} catch (error) {
+		if (error.code !== 'ENOENT') {
+			throw error;
+		}
+	}
+	return data;
+};
 
 export const MAIN_SUBFILES = [
 	{ key: 'video', filename: filename => `${filename}.video.moflex` },
@@ -27,16 +36,12 @@ export const AD_SUBFILES = [
 
 export const metadataFilename = filename => `${filename}.meta.json`;
 
-const readSubfiles = ({ subfileSpecs, filenameFunctionParams, missingSubfilenameCallback }) => {
+const readSubfiles = ({ subfileSpecs, filenameFunctionParams }) => {
 	const subfiles = {};
 	for (const { key: subfileKey, filename: subfilenameFunction } of subfileSpecs) {
 		const subfilename = subfilenameFunction(...filenameFunctionParams);
 		const subfileData = readFromFileIfItExists(subfilename);
-		if (subfileData === undefined) {
-			missingSubfilenameCallback(subfilename);
-		} else {
-			subfiles[subfileKey] = subfileData;
-		}
+		subfiles[subfileKey] = subfileData;
 	}
 	return subfiles;
 };
@@ -82,7 +87,6 @@ if (extractMode) {
 	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), mainSubfiles[key]));
 	adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull, i), adSubfiles[key])));
 } else {
-	const missingSubfilenames = [];
 	let metadataHasSyntaxErrors = false;
 
 	const outMetadataFilename = metadataFilename(inFilePathFull);
@@ -90,7 +94,7 @@ if (extractMode) {
 	let metadata;
 
 	if (metadataData === undefined) {
-		missingSubfilenames.push(outMetadataFilename);
+		console.error(`The following file was not found:\n\t${outMetadataFilename}`);
 	} else {
 		try {
 			metadata = JSON.parse(metadataData);
@@ -105,30 +109,24 @@ if (extractMode) {
 
 	const mainSubfiles = readSubfiles({
 		subfileSpecs: MAIN_SUBFILES,
-		filenameFunctionParams: [inFilePathFull],
-		missingSubfilenameCallback: (subfilename) => {
-			missingSubfilenames.push(subfilename);
-		}
+		filenameFunctionParams: [inFilePathFull]
 	});
 
 	const adsSubfiles = [...Array(metadata?.ads?.length ?? 0).keys().map(i => readSubfiles({
 		subfileSpecs: AD_SUBFILES,
-		filenameFunctionParams: [inFilePathFull, i],
-		missingSubfilenameCallback: (subfilename) => {
-			missingSubfilenames.push(subfilename);
-		}
+		filenameFunctionParams: [inFilePathFull, i]
 	}))];
 
-	const missingSubfileCount = missingSubfilenames.length;
-	if (missingSubfileCount) {
-		console.log(`The following file${missingSubfileCount === 1 ? ' is' : 's are'} missing:\n${missingSubfilenames.join('\n')}`);
-	}
-
 	if (metadataHasSyntaxErrors) {
-		console.log(`The following file has JSON syntax errors:\n${outMetadataFilename}`);
+		console.error(`The following file has JSON syntax errors:\n\t${outMetadataFilename}`);
 	} else {
-		const builtBuffer = rebuildDecrypted({ metadata, mainSubfiles, adsSubfiles });
-		if (userApprovesOverwrite([inFilePathFull], 'decrypted', false)) {
+		let builtBuffer;
+		try {
+			builtBuffer = rebuildDecrypted({ metadata, mainSubfiles, adsSubfiles });
+		} catch (error) {
+			console.error(error.message);
+		}
+		if (builtBuffer && userApprovesOverwrite([inFilePathFull], 'decrypted', false)) {
 			fs.writeFileSync(inFilePathFull, builtBuffer);
 		}
 	}

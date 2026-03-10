@@ -7,11 +7,13 @@ import {
 } from './constants.js';
 import {
 	flattenObject,
-	isType
+	isType,
+	catchError
 } from './helpers.js';
 
 const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
 	const invalidTrailingZerosKeys = [];
+	const missingSubfiles = [];
 	const offsets = {};
 	let cursor = 0;
 	let length;
@@ -37,33 +39,42 @@ const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
 		} else {
 			const dataSectionLength = dataSection.length;
 			const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : UINT_LENGTHS[dataSection.format];
-			switch (dataSectionType) {
-				case 'subfile':
-					offsets[dataSectionLength] = subfiles[dataSectionKey]?.length ?? 0;
-					cursor += offsets[dataSectionLength];
-					break;
-				case 'adStartOffsets':
-				case 'adMetas':
-					cursor += dataSectionActualLength * adCount;
-					break;
-				default:
-					cursor += dataSectionActualLength;
+			if (dataSectionType === 'subfile') {
+				const subfile = subfiles[dataSectionKey];
+				if (isType(subfile, Buffer)) {
+					const subfileLength = subfile.length;
+					offsets[dataSectionLength] = subfileLength;
+					cursor += subfileLength;
+				} else {
+					missingSubfiles.push(dataSectionKey);
+					offsets[dataSectionLength] = 0;
+				}
+			} else {
+				cursor += (dataSectionType === 'adStartOffsets' || dataSectionType === 'adMetas')
+					? dataSectionActualLength * adCount
+					: dataSectionActualLength;
 			}
 		}
 	}
 
-	return { invalidTrailingZerosKeys, offsets, length };
+	return { invalidTrailingZerosKeys, missingSubfiles, offsets, length: length ?? cursor };
 };
 
 const writeDataSection = (buffer, cursor, value, { length, format }) => {
 	if (value == null) {
-		throw new TypeError('Nullish values cannot be written to buffers');
+		throw new TypeError();
 	}
 	let offset = 0;
 	if (isType(length, Number)) {
+		if (!isType(value, String)) {
+			throw new TypeError();
+		}
 		Buffer.from(value, format).copy(buffer, cursor, 0, length); // This assumes it's already writing over 0x00's such that they may trail until length is reached
 		offset = length;
 	} else {
+		if (!isType(value, Number)) {
+			throw new TypeError();
+		}
 		buffer[`writeUint${format}`](value, cursor);
 		offset = UINT_LENGTHS[format];
 	}
@@ -79,7 +90,7 @@ const rebuildToBuffer = ({ buffer, bufferStart = 0, dataSections, adCount, mainO
 			type: dataSectionType,
 			key: dataSectionKey
 		} = dataSection;
-		try {
+		catchError(TypeError, () => {
 			const valueFromMetadata = mainMetadata[dataSectionKey];
 			switch (dataSectionType) {
 				case 'offset':
@@ -95,15 +106,9 @@ const rebuildToBuffer = ({ buffer, bufferStart = 0, dataSections, adCount, mainO
 					break;
 				case 'adMetas':
 					for (let i = 0; i < adCount; i++) {
-						try {
+						catchError(TypeError, () => {
 							cursor += writeDataSection(buffer, cursor, adsMetadata[i][dataSectionKey], dataSection);
-						} catch (error) { // TODO: DRY
-							if (isType(error, TypeError)) {
-								invalidMetadataKeys.push(adInvalidMetdataKeyMapFn(i)(dataSectionKey));
-							} else {
-								throw error;
-							}
-						}
+						}, () => invalidMetadataKeys.push(adInvalidMetdataKeyMapFn(i)(dataSectionKey)));
 					}
 					break;
 				case 'subfile':
@@ -113,6 +118,8 @@ const rebuildToBuffer = ({ buffer, bufferStart = 0, dataSections, adCount, mainO
 				case 'trailingZeros':
 					if (isType(valueFromMetadata, Number)) {
 						cursor += valueFromMetadata; // Assumes bytes being skipped over are already all zero
+					} else {
+						throw new TypeError();
 					}
 					break;
 				case 'constant':
@@ -120,13 +127,7 @@ const rebuildToBuffer = ({ buffer, bufferStart = 0, dataSections, adCount, mainO
 					break;
 				default:
 			}
-		} catch (error) {
-			if (isType(error, TypeError)) {
-				invalidMetadataKeys.push(dataSectionKey);
-			} else {
-				throw error;
-			}
-		}
+		}, () => invalidMetadataKeys.push(dataSectionKey));
 	}
 
 	return invalidMetadataKeys;
@@ -134,6 +135,8 @@ const rebuildToBuffer = ({ buffer, bufferStart = 0, dataSections, adCount, mainO
 
 export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 	const invalidMetadataKeys = [];
+	const missingSubfiles = [];
+	let missingSubfileCount = 0;
 	const mainMetadataUnflattened = { ...metadata };
 	delete mainMetadataUnflattened.ads;
 	const mainMetadata = flattenObject(mainMetadataUnflattened);
@@ -148,6 +151,7 @@ export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 	}
 	const {
 		invalidTrailingZerosKeys: mainInvalidTrailingZerosDataKeys,
+		missingSubfiles: mainMissingSubfiles,
 		offsets: mainOffsets,
 		length: mainLength
 	} = getOffsetsAndLength({
@@ -156,6 +160,11 @@ export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 		subfiles: mainSubfiles,
 		adCount
 	});
+	const mainMissingSubfileCount = mainMissingSubfiles.length;
+	if (mainMissingSubfileCount) {
+		missingSubfiles.push(`Main: ${mainMissingSubfiles.join(', ')}`);
+		missingSubfileCount += mainMissingSubfileCount;
+	}
 	invalidMetadataKeys.push(...mainInvalidTrailingZerosDataKeys);
 	const adsOffsets = [];
 	const adStartOffsets = [];
@@ -163,6 +172,7 @@ export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 	for (let adIndex = 0; adIndex < adCount; adIndex++) {
 		const {
 			invalidTrailingZerosKeys: adInvalidTrailingZerosKeys,
+			missingSubfiles: adMissingSubfiles,
 			offsets: adOffsets,
 			length: adLength
 		} = getOffsetsAndLength({
@@ -173,6 +183,11 @@ export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 		invalidMetadataKeys.push(...adInvalidTrailingZerosKeys.map(adInvalidMetdataKeyMapFn(adIndex)));
 		adsOffsets[adIndex] = adOffsets;
 		adStartOffsets[adIndex] = fullBufferLength;
+		const adMissingSubfileCount = adMissingSubfiles.length;
+		if (adMissingSubfileCount) {
+			missingSubfiles.push(`Ad ${adIndex + 1}: ${adMissingSubfiles.join(', ')}`);
+			missingSubfileCount += adMissingSubfileCount;
+		}
 		fullBufferLength += adLength;
 	}
 	const outBuffer = Buffer.alloc(fullBufferLength);
@@ -201,8 +216,11 @@ export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 	}
 	const invalidMetadataUniqueKeys = [...new Set(invalidMetadataKeys)];
 	const invalidMetadataUniqueKeyCount = invalidMetadataUniqueKeys.length;
-	if (invalidMetadataUniqueKeyCount) {
-		throw new TypeError(`The following metadata key${invalidMetadataUniqueKeyCount === 1 ? ' is' : 's are'} missing or of the wrong data type:\n${invalidMetadataUniqueKeys.join('\n')}`);
+	if (invalidMetadataUniqueKeyCount || missingSubfileCount) {
+		throw new Error([
+			...(missingSubfileCount ? [`The following subfile${missingSubfileCount === 1 ? ' is' : 's are'} missing:${missingSubfiles.map(subfile => `\n\t${subfile}`).join('')}`] : []),
+			...(invalidMetadataUniqueKeyCount ? [`The following metadata key${invalidMetadataUniqueKeyCount === 1 ? ' is' : 's are'} missing or of the wrong data type:${invalidMetadataUniqueKeys.map(key => `\n\t${key}`).join('')}`] : [])
+		].join('\n'));
 	}
 	return outBuffer;
 };

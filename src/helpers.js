@@ -1,4 +1,4 @@
-import fs from 'fs';
+import { UINT_LENGTHS } from './constants.js';
 
 const DELIMITER = '.';
 
@@ -39,18 +39,24 @@ export const unflattenObject = object =>
 
 export const arrayOfEmptyObjects = length => Array.from(Array(length), () => ({}));
 
-export const readFromFileIfItExists = (filename) => {
-	let data;
+export const handleDataSectionOddity = (message) => { // TODO: Rather than logging here, accumulate the oddities
+	console.warn(`WARNING: ${message}; this will not be reflected when rebuilding!`);
+};
+
+export const catchError = (errorType, func, onCatch) => {
 	try {
-		data = fs.readFileSync(filename);
+		func();
 	} catch (error) {
-		if (error.code !== 'ENOENT') {
+		if (isType(error, errorType)) {
+			onCatch();
+		} else {
 			throw error;
 		}
 	}
-	return data;
 };
 
-export const handleDataSectionOddity = (message) => { // TODO: Take a logger function
-	console.warn(`WARNING: ${message}; this will not be reflected when rebuilding!`);
+export const uintToBufferString = (uint, format) => {
+	const buffer = Buffer.alloc(UINT_LENGTHS[format]);
+	buffer[`writeUint${format}`](uint);
+	return buffer.toString('hex');
 };

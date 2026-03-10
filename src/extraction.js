@@ -10,14 +10,14 @@ import {
 	isType,
 	unflattenObject,
 	arrayOfEmptyObjects,
-	handleDataSectionOddity
+	handleDataSectionOddity,
+	uintToBufferString
 } from './helpers.js';
 
-const readDataSection = (buffer, cursor, { length, format }) => ({
-	format, ...(isType(length, Number) // Only subfiles have variable length, not metadata
+const readDataSection = (buffer, cursor, { length, format }) =>
+	isType(length, Number) // Only subfiles have variable length, not metadata
 		? { value: buffer.subarray(cursor, cursor + length).toString(format).replace(/[\0]+$/, ''), length }
-		: (format == null ? { length } : { value: buffer[`readUint${format}`](cursor), length: UINT_LENGTHS[format] }))
-});
+		: (format == null ? { length } : { value: buffer[`readUint${format}`](cursor), length: UINT_LENGTHS[format] });
 
 const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, bufferEnd = buffer.length, dataSections }) => {
 	const offsets = {};
@@ -32,7 +32,6 @@ const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, 
 			type: dataSectionType,
 			key: dataSectionKey
 		} = dataSection;
-		const dataSectionReadResult = readDataSection(buffer, cursor, dataSection);
 		if (dataSectionType === 'trailingZeros') {
 			const dataSectionUntil = dataSection.until;
 			const untilOffset = dataSectionUntil === undefined
@@ -43,11 +42,11 @@ const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, 
 			if (untilOffset < cursor) {
 				throw new Error(`"until" prop of ${JSON.stringify(dataSectionKey)} (${dataSectionUntil == null ? 'start of first ad' : JSON.stringify(dataSectionUntil)}, which is 0x${untilOffset.toString(16)}) is before the cursor (0x${cursor.toString(16)})`);
 			} else {
-				const trailingZerosString = untilOffset !== undefined && buffer.subarray(cursor, untilOffset).toString('hex');
+				const trailingZerosString = buffer.subarray(cursor, untilOffset).toString('hex');
 				if (/^(0{2})*$/.test(trailingZerosString)) {
 					mainMetadata[dataSectionKey] = untilOffset - cursor;
 				} else {
-					handleDataSectionOddity(`The leftover data leading up to ${JSON.stringify(dataSectionUntil)} (${trailingZerosString}) is not all zero bytes`); // TODO: specify data
+					handleDataSectionOddity(`The leftover data leading up to ${JSON.stringify(dataSectionUntil)} (${trailingZerosString}) is not all zero bytes`);
 				}
 				cursor = untilOffset;
 			}
@@ -55,7 +54,7 @@ const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, 
 			const {
 				value: dataSectionValue,
 				length: dataSectionLength
-			} = dataSectionReadResult;
+			} = readDataSection(buffer, cursor, dataSection);
 			const cursorAfterOffset = cursor + offsets[dataSectionLength];
 			const constantValue = getConstantValue({ adCount, dataSection });
 			const previousMetaValue = mainMetadata[dataSectionKey];
@@ -90,8 +89,7 @@ const extractFromBuffer = ({ adMetadataKeyFn, adCount, buffer, bufferStart = 0, 
 					break;
 				case 'constant':
 					if (dataSectionValue !== constantValue) {
-						handleDataSectionOddity(`The data section at offset 0x${cursor.toString(16)} was expected to be ${constantValue} but was ${buffer.subarray(cursor, cursor + dataSectionLength).toString('hex')}`);
-						// TODO: print expected as hex buffer, not number
+						handleDataSectionOddity(`The data section at offset 0x${cursor.toString(16)} was expected to be ${uintToBufferString(constantValue)} but was ${buffer.subarray(cursor, cursor + dataSectionLength).toString('hex')}`);
 					}
 					cursor += dataSectionLength;
 					break;
