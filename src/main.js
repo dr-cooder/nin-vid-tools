@@ -55,7 +55,7 @@ const userApprovesOverwrite = (filenames, description, yOverride) => {
 	const filesToBeOverwrittenCount = filesToBeOverwritten.length;
 
 	return filesToBeOverwrittenCount
-		? keyInYN(`WARNING: The following ${description ? `${description} ` : ''} file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:\n${filesToBeOverwritten.join('\n')}\nIs this OK? (this can be overridden with the "-y" option)`)
+		? keyInYN(`WARNING: The following ${description ? `${description} ` : ''} file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:${filesToBeOverwritten.map('\n\t').join('')}\nIs this OK? (this can be overridden with the "-y" option)`)
 		: true;
 };
 
@@ -81,7 +81,10 @@ switch (extractOrRebuild) {
 if (extractMode) {
 	const outFilePathFull = inFilePathFull;
 	const inFileData = fs.readFileSync(inFilePathFull);
-	const { metadata, mainSubfiles, adsSubfiles } = extractDecrypted(inFileData);
+	const { metadata, mainSubfiles, adsSubfiles, dataSectionOddities } = extractDecrypted(inFileData);
+	if (dataSectionOddities) {
+		console.warn(dataSectionOddities);
+	}
 
 	fs.writeFileSync(metadataFilename(outFilePathFull), JSON.stringify(metadata, null, '\t'));
 	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), mainSubfiles[key]));

@@ -39,10 +39,6 @@ export const unflattenObject = object =>
 
 export const arrayOfEmptyObjects = length => Array.from(Array(length), () => ({}));
 
-export const handleDataSectionOddity = (message) => { // TODO: Rather than logging here, accumulate the oddities
-	console.warn(`WARNING: ${message}; this will not be reflected when rebuilding!`);
-};
-
 export const catchError = (errorType, func, onCatch) => {
 	try {
 		func();
