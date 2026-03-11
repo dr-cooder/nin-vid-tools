@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// TODO: Rename this file to "example.js" and export "extraction.js" and "rebuilding.js"
+// TODO: Rename this file to "nin-vid-tools.js" and export "extraction.js" and "rebuilding.js"
 
 import fs from 'fs';
 import path from 'path';
+// TODO: Actually use command-line-args
+// import commandLineArgs from 'command-line-args';
 import { keyInYN } from 'readline-sync';
 import { extractDecrypted } from './extraction.js';
 import { rebuildDecrypted } from './rebuilding.js';
 import { isType } from './helpers.js';
 
+// TODO: decrypt/encrypt options
 // import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
 // import { fileURLToPath } from 'url';
 // const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +28,7 @@ export const readFromFileIfItExists = (filename) => {
 	return data;
 };
 
+// TODO: Make one of these for the "options.json" and "content.bin" seen under the "Decrypted" section of the README
 export const MAIN_SUBFILES = [
 	{ key: 'video', filename: filename => `${filename}.video.moflex` },
 	{ key: 'thumbnail', filename: filename => `${filename}.thumb.jpg` }
@@ -55,7 +59,7 @@ const userApprovesOverwrite = (filenames, description, yOverride) => {
 	const filesToBeOverwrittenCount = filesToBeOverwritten.length;
 
 	return filesToBeOverwrittenCount
-		? keyInYN(`WARNING: The following ${description ? `${description} ` : ''} file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:${filesToBeOverwritten.map('\n\t').join('')}\nIs this OK? (this can be overridden with the "-y" option)`)
+		? keyInYN(`WARNING: The following ${description ? `${description} ` : ''}file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:${filesToBeOverwritten.map(filename => `\n\t${filename}`).join('')}\nIs this OK? (this can be overridden with the "-y" option)`)
 		: true;
 };
 
@@ -86,9 +90,13 @@ if (extractMode) {
 		console.warn(dataSectionOddities);
 	}
 
-	fs.writeFileSync(metadataFilename(outFilePathFull), JSON.stringify(metadata, null, '\t'));
-	MAIN_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull), mainSubfiles[key]));
-	adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fs.writeFileSync(filename(outFilePathFull, i), adSubfiles[key])));
+	const filesToWrite = {};
+	filesToWrite[metadataFilename(outFilePathFull)] = JSON.stringify(metadata, null, '\t');
+	MAIN_SUBFILES.forEach(({ key, filename }) => filesToWrite[filename(outFilePathFull)] = mainSubfiles[key]);
+	adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => filesToWrite[filename(outFilePathFull, i)] = adSubfiles[key]));
+	if (userApprovesOverwrite(Object.keys(filesToWrite), 'extracted', false)) {
+		Object.entries(filesToWrite).forEach(value => fs.writeFileSync(...value));
+	}
 } else {
 	let metadataHasSyntaxErrors = false;
 
