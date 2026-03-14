@@ -1,5 +1,4 @@
 import {
-	UINT_LENGTHS,
 	AD_COUNT_OFFSET,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
@@ -10,13 +9,15 @@ import {
 	isType,
 	unflattenObject,
 	arrayOfEmptyObjects,
-	uintToBufferString
+	intFormatLength,
+	accessBufferUInt,
+	uIntToBufferString
 } from './helpers.js';
 
 const readDataSection = (buffer, cursor, { length, format }) =>
 	isType(length, Number) // Only subfiles have variable length, not metadata
 		? { value: buffer.subarray(cursor, cursor + length).toString(format).replace(/[\0]+$/, ''), length }
-		: (format == null ? { length } : { value: buffer[`readUint${format}`](cursor), length: UINT_LENGTHS[format] });
+		: (format == null ? { length } : { value: accessBufferUInt({ buffer, format, offset: cursor }), length: intFormatLength(format) });
 
 const extractFromBuffer = ({ adIndex = -1, adCount, lastAd, buffer, bufferStart = 0, bufferEnd = buffer.length, dataSections }) => {
 	const adMetadataKeyFn = adIndex !== -1 && adInvalidMetdataKeyMapFn(adIndex);
@@ -98,7 +99,7 @@ const extractFromBuffer = ({ adIndex = -1, adCount, lastAd, buffer, bufferStart 
 					break;
 				case 'constant':
 					if (dataSectionValue !== constantValue) {
-						dataSectionOddities.push(`The data section from 0x${cursor.toString(16)} to 0x${cursorPlusLength.toString(16)} was expected to be ${uintToBufferString(constantValue, dataSection.format)} but was ${buffer.subarray(cursor, cursorPlusLength).toString('hex')}`);
+						dataSectionOddities.push(`The data section from 0x${cursor.toString(16)} to 0x${cursorPlusLength.toString(16)} was expected to be ${uIntToBufferString({ uInt: constantValue, format: dataSection.format })} but was ${buffer.subarray(cursor, cursorPlusLength).toString('hex')}`);
 					}
 					cursor = cursorPlusLength;
 					break;
@@ -111,7 +112,7 @@ const extractFromBuffer = ({ adIndex = -1, adCount, lastAd, buffer, bufferStart 
 };
 
 export const extractDecrypted = (inFileDataDecrypted) => {
-	const adCount = inFileDataDecrypted.readUint8(AD_COUNT_OFFSET);
+	const adCount = inFileDataDecrypted.readUInt8(AD_COUNT_OFFSET);
 	const adsSubfiles = [];
 	const { mainMetadata, mainSubfiles, adsMetadata, adStartOffsets, dataSectionOddities } = extractFromBuffer({
 		adCount,

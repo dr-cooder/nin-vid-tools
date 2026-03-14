@@ -1,5 +1,3 @@
-import { UINT_LENGTHS } from './constants.js';
-
 const DELIMITER = '.';
 
 export const isType = (object, type) =>
@@ -51,8 +49,26 @@ export const catchError = (errorType, func, onCatch) => {
 	}
 };
 
-export const uintToBufferString = (uint, format) => {
-	const buffer = Buffer.alloc(UINT_LENGTHS[format]);
-	buffer[`writeUint${format}`](uint);
+export const intFormatLength = format => ({
+	8: 0x1,
+	16: 0x2,
+	32: 0x4,
+	64: 0x8
+}[format.match(/^[0-9]+/)?.[0]]);
+
+export const accessBufferUInt = ({
+	buffer,
+	format,
+	uInt,
+	offset
+}) => buffer[`${uInt === undefined ? 'read' : 'write'}${format.startsWith('64') ? 'Big' : ''}UInt${format}`](...[...(uInt === undefined ? [] : [uInt]), offset]);
+
+export const uIntToBufferString = ({ uInt, format }) => {
+	const buffer = Buffer.alloc(intFormatLength(format));
+	accessBufferUInt({ buffer, format, uInt });
 	return buffer.toString('hex');
 };
+
+export const isOrAre = count => count === 1 ? ' is' : 's are';
+
+export const tabbedLines = items => items.map(item => `\n\t${item}`).join('');

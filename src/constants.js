@@ -1,10 +1,6 @@
-export const UINT_LENGTHS = {
-	'8': 0x1,
-	'16LE': 0x2,
-	'32LE': 0x4
-};
+// TODO: Rename this file something more in line with "data format specs"
 
-export const AD_COUNT_OFFSET = 0xCC;
+export const AD_COUNT_OFFSET = 0x18;
 
 // TODO: Make this class and method-based?
 export const MAIN_DATA_SECTIONS = [

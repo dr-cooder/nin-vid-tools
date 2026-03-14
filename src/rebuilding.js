@@ -1,5 +1,4 @@
 import {
-	UINT_LENGTHS,
 	MAIN_DATA_SECTIONS,
 	AD_DATA_SECTIONS,
 	adInvalidMetdataKeyMapFn,
@@ -8,7 +7,11 @@ import {
 import {
 	flattenObject,
 	isType,
-	catchError
+	catchError,
+	intFormatLength,
+	accessBufferUInt,
+	isOrAre,
+	tabbedLines
 } from './helpers.js';
 
 const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
@@ -38,7 +41,7 @@ const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
 			}
 		} else {
 			const dataSectionLength = dataSection.length;
-			const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : UINT_LENGTHS[dataSection.format];
+			const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : intFormatLength(dataSection.format);
 			if (dataSectionType === 'subfile') {
 				const subfile = subfiles[dataSectionKey];
 				if (isType(subfile, Buffer)) {
@@ -75,8 +78,8 @@ const writeDataSection = (buffer, cursor, value, { length, format }) => {
 		if (!isType(value, Number)) {
 			throw new TypeError();
 		}
-		buffer[`writeUint${format}`](value, cursor);
-		offset = UINT_LENGTHS[format];
+		accessBufferUInt({ buffer, format, uInt: value, offset: cursor });
+		offset = intFormatLength(format);
 	}
 	return offset;
 };
@@ -218,8 +221,8 @@ export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
 	const invalidMetadataUniqueKeyCount = invalidMetadataUniqueKeys.length;
 	if (invalidMetadataUniqueKeyCount || missingSubfileCount) {
 		throw new Error([
-			...(missingSubfileCount ? [`The following subfile${missingSubfileCount === 1 ? ' is' : 's are'} missing:${missingSubfiles.map(subfile => `\n\t${subfile}`).join('')}`] : []),
-			...(invalidMetadataUniqueKeyCount ? [`The following metadata key${invalidMetadataUniqueKeyCount === 1 ? ' is' : 's are'} missing or of the wrong data type:${invalidMetadataUniqueKeys.map(key => `\n\t${key}`).join('')}`] : [])
+			...(missingSubfileCount ? [`The following subfile${isOrAre(missingSubfileCount)} missing:${tabbedLines(missingSubfiles)}`] : []),
+			...(invalidMetadataUniqueKeyCount ? [`The following metadata key${isOrAre(invalidMetadataUniqueKeyCount)} missing or of the wrong data type:${tabbedLines(invalidMetadataUniqueKeys)}`] : [])
 		].join('\n'));
 	}
 	return outBuffer;
