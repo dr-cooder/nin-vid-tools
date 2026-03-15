@@ -4,6 +4,7 @@ import fs from 'fs';
 import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
 // import path from 'path';
 import { program } from 'commander';
+import { spawn } from 'child_process';
 import { keyInYN } from 'readline-sync';
 import { extract } from './extract.js';
 import { rebuild } from './rebuild.js';
@@ -118,10 +119,9 @@ const generateCommand = ({
 
 generateCommand({
 	name: 'extract',
-	description: 'extract description', // TODO: Write better descriptions for, and document, these commands
+	description: 'extract description', // TODO: Write better descriptions for these commands
 	argumentIsSource: true,
 	fn: (inFilePath, { yesOverwrite }) => {
-		const outFilePath = inFilePath;
 		const inFileData = fs.readFileSync(inFilePath);
 		const { metadata, mainSubfiles, adsSubfiles, dataSectionOddities } = extract(inFileData);
 		if (dataSectionOddities) {
@@ -129,9 +129,9 @@ generateCommand({
 		}
 
 		const fileDict = {};
-		fileDict[metadataFilename(outFilePath)] = stringifyWithTabIndent(metadata);
-		MAIN_SUBFILES.forEach(({ key, filename }) => fileDict[filename(outFilePath)] = mainSubfiles[key]);
-		adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fileDict[filename(outFilePath, i)] = adSubfiles[key]));
+		fileDict[metadataFilename(inFilePath)] = stringifyWithTabIndent(metadata);
+		MAIN_SUBFILES.forEach(({ key, filename }) => fileDict[filename(inFilePath)] = mainSubfiles[key]);
+		adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fileDict[filename(inFilePath, i)] = adSubfiles[key]));
 		writeFiles({ fileDict, description: 'extracted', yesOverwrite });
 	}
 });
@@ -302,6 +302,66 @@ generateCommand({
 	requiresKey: true
 });
 */
+
+program
+	.command('convert')
+	.description('convert moflex using FFmpeg, auto-detecting 3D format and reformatting as side-by-side if applicable')
+	.option('-3, --is-3d', 'video is 3D (this program will be able to auto-detect this in the future)')
+	.option('-s, --stretch-sbs', 'if the video is 3D, double the video height by adjusting the sample aspect ratio; this is required by 3D video players that compensatively stretch each half of the video')
+	.argument('[input]', 'moflex file to be converted')
+	.argument('[additional-ffmpeg-options...]', 'FFmpeg options, the last of which must be the output filename') // TODO: Make these optional; if there are none, simply print the 3D format
+	.action((inFilePath, additionalFFmpegOptions, { is3d, stretch }) => {
+		// TODO: Auto-detect 3D with the following pseudocode
+		/*
+		Start cursor at 0xE
+		Begin loop
+			Read two variable-length uInts (for up to 4 bytes, concatenate each group of 7 lowest-order bits until the highest-order bit is 0) and store them as "type" and "size"
+			Switch on "type":
+				0:
+					Skip ahead "size" bytes
+				2:
+					Skip ahead 6 bytes
+				4:
+					Skip ahead 2 bytes
+				1 or 3:
+					Skip ahead 2 bytes
+					Store the following uInt16BE's:
+						Frame rate numerator
+						Frame rate denominator
+						Width
+						Height
+					Skip ahead 2 bytes
+					Store the current byte as 3D format:
+						0: 3D Interleave, Left First
+						1: 3D Interleave, Right First
+						2: 3D Top-To-Bottom, Left First
+						3: 3D Top-To-Bottom, Right First
+						4: 3D Side-By-Side, Left First
+						5: 3D Side-By-Side, Right First
+						6: 2D
+					Break out of loop
+		End loop
+		References:
+		https://code.ffmpeg.org/FFmpeg/FFmpeg/src/branch/release/4.4/libavformat/moflex.c
+		https://github.com/Gericom/MobiclipDecoder/blob/c88b67d3cca93de03d286f67f01ee40da605f5ae/LibMobiclip/Containers/Moflex/MoLiveDemux.cs
+		https://github.com/Gericom/MobiclipDecoder/blob/c88b67d3cca93de03d286f67f01ee40da605f5ae/LibMobiclip/Containers/Moflex/MoLiveStreamVideoWithLayout.cs
+		*/
+		spawn('ffmpeg', [
+			'-i',
+			inFilePath,
+			...(is3d
+				? [
+					'-filter_complex',
+					`[0:v]select=mod(n+1\\,2)[vl];[0:v]select=mod(n\\,2)[vr];[vl][vr]hstack=2[stacked];[stacked]select=mod(n+1\\,2)${stretch ? '[selected];[selected]setsar=0.5' : ''}[out]`,
+					'-map',
+					'[out]:0',
+					'-map',
+					'0:a'
+				]
+				: []),
+			...additionalFFmpegOptions
+		], { stdio: 'inherit' });
+	});
 
 program
 	.parse(process.argv);
