@@ -1,5 +1,5 @@
 # nin-vid-tools
-Command-line tools and package to extract and rebuild [Nintendo Video](https://en.wikipedia.org/wiki/Nintendo_Video) BOSS files. **(WIP)**
+Command-line tools and package to extract and rebuild [Nintendo Video](https://en.wikipedia.org/wiki/Nintendo_Video) and [Eurosport](https://www.nintendo.com/en-gb/News/2011/Nintendo-partners-with-Eurosport-to-release-3D-video-content-253391.html) BOSS files. **(WIP)**
 ## Setup
 1. [Install Node.js and npm.](https://nodejs.org/en/download)
 2. [Download the source code ZIP file.](https://github.com/dr-cooder/nin-vid-tools/archive/refs/heads/master.zip)
@@ -11,7 +11,7 @@ Command-line tools and package to extract and rebuild [Nintendo Video](https://e
 	- Option 2: Use the option `-k (insert key here)` or `--boss-aes-key (insert key here)` when running a command that involves either decryption or encryption.
 7. If you want to convert MOFLEX files to more common video formats like MP4, you will need to [install FFmpeg.](https://www.ffmpeg.org)
 ## Usage
-Nintendo Video BOSS files can be in three possible states, represented by files with the following extensions:
+Nintendo Video / Eurosport BOSS files can be in three possible states, represented by files with the following extensions:
 1. Encrypted
 	- BOSS: `name.boss`
 2. Decrypted
@@ -38,4 +38,4 @@ You can also use the `convert` command to convert MOFLEX files to more common vi
 `src/nin-vid-tools.js convert name.boss.content.bin.video.moflex -s -- -y name.boss.content.bin.video.moflex.mp4`
 
 ## Important Disclaimer
-**At the time of writing, this is merely a proof-of-concept. BOSS files modified by this program, especially with invalid data, have not been tested in the Nintendo Video app yet. Please do not try to run the output of this program in-app, especially with real hardware, lest something important break.**
+**At the time of writing, this is merely a proof-of-concept. BOSS files modified by this program, especially with invalid data, have not been tested in the Nintendo Video or Eurosport apps yet. Please do not try to run the output of this program in-app, especially with real hardware, lest something important break.**
