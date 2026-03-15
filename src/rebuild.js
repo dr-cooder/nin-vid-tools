@@ -3,7 +3,7 @@ import {
 	AD_DATA_SECTIONS,
 	adInvalidMetdataKeyMapFn,
 	getConstantValue
-} from './constants.js';
+} from './data-sections.js';
 import {
 	flattenObject,
 	isType,
@@ -136,7 +136,7 @@ const rebuildToBuffer = ({ buffer, bufferStart = 0, dataSections, adCount, mainO
 	return invalidMetadataKeys;
 };
 
-export const rebuildDecrypted = ({ metadata, mainSubfiles, adsSubfiles }) => {
+export const rebuild = ({ metadata, mainSubfiles, adsSubfiles }) => {
 	const invalidMetadataKeys = [];
 	const missingSubfiles = [];
 	let missingSubfileCount = 0;

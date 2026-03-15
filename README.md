@@ -1,5 +1,5 @@
 # nin-vid-tools
-Command-line tools to extract and rebuild [Nintendo Video](https://en.wikipedia.org/wiki/Nintendo_Video) BOSS files. **(WIP)**
+Command-line tools and package to extract and rebuild [Nintendo Video](https://en.wikipedia.org/wiki/Nintendo_Video) BOSS files. **(WIP)**
 ## Setup
 1. [Install Node.js and npm.](https://nodejs.org/en/download)
 2. [Download the source code ZIP file.](https://github.com/dr-cooder/nin-vid-tools/archive/refs/heads/master.zip)
@@ -24,9 +24,12 @@ Nintendo Video BOSS files can be in three possible states, represented by files 
 	- Bottom screen ad image(s): `name.boss.content.bin.ad1.jpg` (, `name.boss.content.bin.ad2.jpg`, ...)
 
 They can be converted between these states with the following commands:
-- Decrypted &rarr; Extracted: `src/main.js extract name.boss.content.bin`
-- Extracted &rarr; Decrypted: `src/main.js rebuild name.boss.content.bin`
+- Encrypted &rarr; Extracted: `src/nin-vid-tools.js decrypt-and-extract name.boss` **(Not yet implemented)**
+- Extracted &rarr; Encrypted: `src/nin-vid-tools.js rebuild-and-encrypt name.boss` **(Not yet implemented)**
+- Encrypted &rarr; Decrypted: `src/nin-vid-tools.js decrypt name.boss`
+- Decrypted &rarr; Extracted: `src/nin-vid-tools.js extract name.boss.content.bin`
+- Extracted &rarr; Decrypted: `src/nin-vid-tools.js rebuild name.boss.content.bin`
+- Decrypted &rarr; Encrypted: `src/nin-vid-tools.js encrypt name.boss`
 
-(Todo: create and explain the commands to get the file between all of the states)
 ## Important Disclaimer
 **At the time of writing, this is merely a proof-of-concept. BOSS files modified by this program, especially with invalid data, have not been tested in the Nintendo Video app yet. Please do not try to run the output of this program in-app, especially with real hardware, lest something important break.**

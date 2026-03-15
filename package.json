@@ -24,5 +24,8 @@
     "@types/node": "^25.3.3",
     "commander": "^14.0.3",
     "readline-sync": "^1.4.10"
+  },
+  "exports": {
+    ".": "./src/index.js"
   }
 }

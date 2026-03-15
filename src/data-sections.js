@@ -1,5 +1,3 @@
-// TODO: Rename this file something more in line with "data format specs"
-
 export const AD_COUNT_OFFSET = 0x18;
 
 // TODO: Make this class and method-based?

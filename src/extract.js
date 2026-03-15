@@ -4,7 +4,7 @@ import {
 	AD_DATA_SECTIONS,
 	adInvalidMetdataKeyMapFn,
 	getConstantValue
-} from './constants.js';
+} from './data-sections.js';
 import {
 	isType,
 	unflattenObject,
@@ -111,7 +111,7 @@ const extractFromBuffer = ({ adIndex = -1, adCount, lastAd, buffer, bufferStart 
 	return { mainMetadata, mainSubfiles, adsMetadata, adStartOffsets, dataSectionOddities };
 };
 
-export const extractDecrypted = (inFileDataDecrypted) => {
+export const extract = (inFileDataDecrypted) => {
 	const adCount = inFileDataDecrypted.readUInt8(AD_COUNT_OFFSET);
 	const adsSubfiles = [];
 	const { mainMetadata, mainSubfiles, adsMetadata, adStartOffsets, dataSectionOddities } = extractFromBuffer({

@@ -1,13 +1,12 @@
 #!/usr/bin/env node
-// TODO: Rename this file to "nin-vid-tools.js" and export "extraction.js" and "rebuilding.js"
 
 import fs from 'fs';
 import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
 // import path from 'path';
 import { program } from 'commander';
 import { keyInYN } from 'readline-sync';
-import { extractDecrypted } from './extraction.js';
-import { rebuildDecrypted } from './rebuilding.js';
+import { extract } from './extract.js';
+import { rebuild } from './rebuild.js';
 import {
 	isType,
 	flattenObject,
@@ -124,7 +123,7 @@ generateCommand({
 	fn: (inFilePath, { yesOverwrite }) => {
 		const outFilePath = inFilePath;
 		const inFileData = fs.readFileSync(inFilePath);
-		const { metadata, mainSubfiles, adsSubfiles, dataSectionOddities } = extractDecrypted(inFileData);
+		const { metadata, mainSubfiles, adsSubfiles, dataSectionOddities } = extract(inFileData);
 		if (dataSectionOddities) {
 			console.warn(dataSectionOddities);
 		}
@@ -169,7 +168,7 @@ generateCommand({
 			throw new SyntaxError('The metadata file has JSON syntax errors');
 		} else {
 			writeFiles({
-				fileDict: { [outFilePath]: rebuildDecrypted({ metadata, mainSubfiles, adsSubfiles }) },
+				fileDict: { [outFilePath]: rebuild({ metadata, mainSubfiles, adsSubfiles }) },
 				description: 'rebuilt',
 				yesOverwrite
 			});
