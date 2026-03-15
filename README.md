@@ -33,7 +33,7 @@ They can be converted between these states with the following commands:
 - Decrypted &rarr; Encrypted: `src/nin-vid-tools.js encrypt name.boss`
 The program will ask you if you want to overwrite files. To suppress this, add the `-y` or `--yes-overwrite` option.
 
-You can also use the `convert` command to convert MOFLEX files to more common video formats like MP4 using FFmpeg, auto-detecting their 3D format **(Not yet implemented; for now, use the option `-3` or `--is-3d`)** and reformatting them as side-by-side if applicable. Simply provide the MOFLEX filename and the rest of the FFmpeg options; unless the only one of those you wish to provide is the output filename, please denote the start of them with `--`. If you want to watch the video in a 3D video player that compensatively stretches each half of the video, add the option `-s` or `--stretch`. **I will not tell you how to convert common video formats to MOFLEX.**
+You can also use the `convert` command to convert MOFLEX files to more common video formats like MP4 using FFmpeg, auto-detecting their 3D format **(Not yet implemented; for now, use the option `-3` or `--is-3d`)** and reformatting them as side-by-side (use the option `-s` or `--half-sbs` to use [the Half SBS format](https://easefab.com/images/full-sbs-vs-half-sbs.jpg)) if applicable. Simply provide the MOFLEX filename and the rest of the FFmpeg options; unless the only one of those you wish to provide is the output filename, please denote the start of them with `--`. **I will not tell you how to convert common video formats to MOFLEX.**
 
 `src/nin-vid-tools.js convert name.boss.content.bin.video.moflex -s -- -y name.boss.content.bin.video.moflex.mp4`
 

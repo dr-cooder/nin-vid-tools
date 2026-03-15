@@ -307,10 +307,10 @@ program
 	.command('convert')
 	.description('convert moflex using FFmpeg, auto-detecting 3D format and reformatting as side-by-side if applicable')
 	.option('-3, --is-3d', 'video is 3D (this program will be able to auto-detect this in the future)')
-	.option('-s, --stretch-sbs', 'if the video is 3D, double the video height by adjusting the sample aspect ratio; this is required by 3D video players that compensatively stretch each half of the video')
+	.option('-s, --half-sbs', 'if the video is 3D, use the Half SBS format')
 	.argument('[input]', 'moflex file to be converted')
 	.argument('[additional-ffmpeg-options...]', 'FFmpeg options, the last of which must be the output filename') // TODO: Make these optional; if there are none, simply print the 3D format
-	.action((inFilePath, additionalFFmpegOptions, { is3d, stretch }) => {
+	.action((inFilePath, additionalFFmpegOptions, { is3d, halfSbs }) => {
 		// TODO: Auto-detect 3D with the following pseudocode
 		/*
 		Start cursor at 0xE
@@ -352,7 +352,7 @@ program
 			...(is3d
 				? [
 					'-filter_complex',
-					`[0:v]select=mod(n+1\\,2)[vl];[0:v]select=mod(n\\,2)[vr];[vl][vr]hstack=2[stacked];[stacked]select=mod(n+1\\,2)${stretch ? '[selected];[selected]setsar=0.5' : ''}[out]`,
+					`[0:v]select=mod(n+1\\,2)[vl];[0:v]select=mod(n\\,2)[vr];[vl][vr]hstack=2[stacked];[stacked]select=mod(n+1\\,2)${halfSbs ? '[selected];[selected]setsar=0.5' : ''}[out]`,
 					'-map',
 					'[out]:0',
 					'-map',
