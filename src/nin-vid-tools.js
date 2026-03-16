@@ -303,6 +303,24 @@ generateCommand({
 });
 */
 
+const readVariableUInts = (buffer, cursor, count = 1) => {
+	const uInts = [];
+	for (let i = 0; i < count; i++) {
+		let uInt = 0;
+		for (let j = 0; j < 4; j++) {
+			uInt <<= 7;
+			const currentByte = buffer[cursor];
+			cursor++;
+			uInt += currentByte & 0x7F;
+			if (!(currentByte & 0x80)) {
+				break;
+			}
+		}
+		uInts[i] = uInt;
+	}
+	return { uInts, cursor };
+};
+
 program
 	.command('convert')
 	.description('convert moflex using FFmpeg, auto-detecting 3D format and reformatting as side-by-side if applicable')
@@ -311,58 +329,90 @@ program
 	.option('-v, --over-under', 'if the video is 3D, convert to OU instead of SBS')
 	.option('-s, --swap', 'if the video is 3D, swap positions of L and R images')
 	.argument('[input]', 'moflex file to be converted')
-	.argument('[additional-ffmpeg-options...]', 'FFmpeg options, the last of which must be the output filename') // TODO: Make these optional; if there are none, simply print the 3D format
-	.action((inFilePath, additionalFFmpegOptions, { is3d, half, overUnder, swap }) => {
-		// TODO: Auto-detect 3D with the following pseudocode
-		/*
-		Start cursor at 0xE
-		Begin loop
-			Read two variable-length uInts (for up to 4 bytes, concatenate each group of 7 lowest-order bits until the highest-order bit is 0) and store them as "type" and "size"
-			Switch on "type":
-				0:
-					Skip ahead "size" bytes
-				2:
-					Skip ahead 6 bytes
-				4:
-					Skip ahead 2 bytes
-				1 or 3:
-					Skip ahead 2 bytes
-					Store the following uInt16BE's:
-						Frame rate numerator
-						Frame rate denominator
-						Width
-						Height
-					Skip ahead 2 bytes
-					Store the current byte as 3D format:
-						0: 3D Interleave, Left First
-						1: 3D Interleave, Right First
-						2: 3D Top-To-Bottom, Left First
-						3: 3D Top-To-Bottom, Right First
-						4: 3D Side-By-Side, Left First
-						5: 3D Side-By-Side, Right First
-						6: 2D
-					Break out of loop
-		End loop
-		References:
-		https://code.ffmpeg.org/FFmpeg/FFmpeg/src/branch/release/4.4/libavformat/moflex.c
-		https://github.com/Gericom/MobiclipDecoder/blob/c88b67d3cca93de03d286f67f01ee40da605f5ae/LibMobiclip/Containers/Moflex/MoLiveDemux.cs
-		https://github.com/Gericom/MobiclipDecoder/blob/c88b67d3cca93de03d286f67f01ee40da605f5ae/LibMobiclip/Containers/Moflex/MoLiveStreamVideoWithLayout.cs
-		*/
-		spawn('ffmpeg', [
-			'-i',
-			inFilePath,
-			...(is3d
-				? [
-					'-filter_complex',
-					`[0:v]select=mod(n+1\\,2)[vl];[0:v]select=mod(n\\,2)[vr];${swap ? '[vr][vl]' : '[vl][vr]'}${overUnder ? 'v' : 'h'}stack=2[stacked];[stacked]select=mod(n+1\\,2)${half ? `[selected];[selected]setsar=${overUnder ? '2' : '0.5'}` : ''}[out]`,
-					'-map',
-					'[out]:0',
-					'-map',
-					'0:a'
-				]
-				: []),
-			...additionalFFmpegOptions
-		], { stdio: 'inherit' });
+	.argument('[additional-ffmpeg-options...]', 'FFmpeg options, the last of which must be the output filename')
+	.action((inFilePath, additionalFFmpegOptions, { half, overUnder, swap = false }) => {
+		// https://code.ffmpeg.org/FFmpeg/FFmpeg/src/branch/release/4.4/libavformat/moflex.c
+		// https://github.com/Gericom/MobiclipDecoder/blob/c88b67d3cca93de03d286f67f01ee40da605f5ae/LibMobiclip/Containers/Moflex/MoLiveDemux.cs
+		// https://github.com/Gericom/MobiclipDecoder/blob/c88b67d3cca93de03d286f67f01ee40da605f5ae/LibMobiclip/Containers/Moflex/MoLiveStreamVideoWithLayout.cs
+		const inFileData = fs.readFileSync(inFilePath);
+		let cursor = 0xE;
+		let videoStreamReached;
+		while (cursor < inFileData.length) {
+			const { uInts: [type, size], cursor: cursorAfterTypeAndSize } = readVariableUInts(inFileData, cursor, 2);
+			cursor = cursorAfterTypeAndSize;
+			switch (type) {
+				case 0:
+					cursor += size;
+					break;
+				case 2:
+					cursor += 6;
+					break;
+				case 4:
+					cursor += 2;
+					break;
+				case 1:
+				case 3:
+					cursor += 2;
+					videoStreamReached = type;
+					break;
+				default:
+					throw new Error(`Unknown MOFLEX stream type: ${type}`);
+			}
+			if (videoStreamReached) {
+				break;
+			}
+		}
+		const fpsNumerator = inFileData.readUInt16BE(cursor);
+		const fpsDenominator = inFileData.readUInt16BE(cursor + 0x2);
+		const width = inFileData.readUInt16BE(cursor + 0x4);
+		const height = inFileData.readUInt16BE(cursor + 0x6);
+		const formatOf3D = videoStreamReached === 3 ? inFileData.readUInt8(cursor + 0xA) : 6;
+		const formatOf3DIsSwapped = !!(formatOf3D % 2);
+		const formatOf3DSupercategory = Math.floor(formatOf3D / 2);
+		const formatOf3DIsInterleave = formatOf3DSupercategory === 0;
+		const fpsDenominatorFinal = fpsDenominator * (formatOf3DIsInterleave ? 2 : 1);
+		console.log(`${[
+			'3D Interleave, Left First',
+			'3D Interleave, Right First',
+			// TODO: Get MOFLEX files in these stacked formats and verify that they are Full
+			'3D Top-To-Bottom, Left First',
+			'3D Top-To-Bottom, Right First',
+			'3D Side-By-Side, Left First',
+			'3D Side-By-Side, Right First',
+			'2D'
+		][formatOf3D]}, ${width}x${height}, ${fpsNumerator / fpsDenominatorFinal}fps`);
+		if (formatOf3D > 6) {
+			throw new Error(`Unknown 3D format: ${formatOf3D}`);
+		}
+		if (additionalFFmpegOptions.length) {
+			spawn('ffmpeg', [
+				'-i',
+				inFilePath,
+				...(formatOf3DSupercategory === 3
+					? []
+					: [
+						'-filter_complex',
+						`${[
+							'[0:v]select=mod(n+1\\,2)[vl];[0:v]select=mod(n\\,2)[vr]',
+							'[0:v]crop=iw/2:ih:0:0[vl];[0:v]crop=iw/2:ih:ow:0[vr]',
+							'[0:v]crop=iw:ih/2:0:0[vl];[0:v]crop=iw:ih/2:0:oh[vr]'
+						][formatOf3DSupercategory]};${formatOf3DIsSwapped === swap ? '[vl][vr]' : '[vr][vl]'}${overUnder ? 'v' : 'h'}stack=2${half ? `[stacked];[stacked]setsar=${overUnder ? '2' : '0.5'}` : ''}[out]`,
+						...(formatOf3DIsInterleave
+							? [
+								'-r',
+								`${fpsNumerator}/${fpsDenominatorFinal}`
+							]
+							: []
+						),
+						'-map',
+						'[out]:0',
+						'-map',
+						'0:a'
+					]
+				),
+				...additionalFFmpegOptions
+			], { stdio: 'inherit' });
+		}
 	});
 
 program
