@@ -1,7 +1,7 @@
 {
   "name": "nin-vid-tools",
   "version": "0.0.1",
-  "description": "Command-line tools to extract and rebuild Nintendo Video BOSS files",
+  "description": "Extract and rebuild Nintendo Video and Eurosport BOSS files",
   "type": "module",
   "main": "./src/main.js",
   "repository": {

@@ -33,9 +33,14 @@ They can be converted between these states with the following commands:
 - Decrypted &rarr; Encrypted: `src/nin-vid-tools.js encrypt name.boss`
 The program will ask you if you want to overwrite files. To suppress this, add the `-y` or `--yes-overwrite` option.
 
-You can also use the `convert` command to convert MOFLEX files to more common video formats like MP4 using FFmpeg, auto-detecting their 3D format **(Not yet implemented; for now, use the option `-3` or `--is-3d`)** and reformatting them as side-by-side (use the option `-s` or `--half-sbs` to use [the Half SBS format](https://easefab.com/images/full-sbs-vs-half-sbs.jpg)) if applicable. Simply provide the MOFLEX filename and the rest of the FFmpeg options; unless the only one of those you wish to provide is the output filename, please denote the start of them with `--`. **I will not tell you how to convert common video formats to MOFLEX.**
+You can also use the `convert` command to convert MOFLEX files to more common video formats like MP4 using FFmpeg, auto-detecting their 3D format **(Not yet implemented; for now, use the option `-3` or `--is-3d`)** and, if applicable, reformatting them as Full SBS by default. This format can be customized with the following commands:
+- `-h`/`--half`: use [Half format instead of Full format](https://easefab.com/images/full-sbs-vs-half-sbs.jpg)
+- `-v`/`--over-under`: use Over-Under (L image on the top and R image on the bottom by default) instead of Side-By-Side
+- `-s`/`--swap`: swap the positions of the L and R images
+After that, simply provide the MOFLEX filename and the rest of the FFmpeg options you wish to provide. Unless the only such option is the output filename, please denote the start of them with `--`. **I will not tell you how to convert common video formats to MOFLEX.**
 
-`src/nin-vid-tools.js convert name.boss.content.bin.video.moflex -s -- -y name.boss.content.bin.video.moflex.mp4`
+For example, use the following command to convert a 3D video to H-OU with the L image on the bottom and the R image on the top, and allow the output to overwrite:
+`src/nin-vid-tools.js convert name.boss.content.bin.video.moflex -hvs -- -y name.boss.content.bin.video.moflex.mp4`
 
 ## Important Disclaimer
 **At the time of writing, this is merely a proof-of-concept. BOSS files modified by this program, especially with invalid data, have not been tested in the Nintendo Video or Eurosport apps yet. Please do not try to run the output of this program in-app, especially with real hardware, lest something important break.**
