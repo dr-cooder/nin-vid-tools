@@ -5,7 +5,9 @@ import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
 // import path from 'path';
 import { program } from 'commander';
 import { spawn } from 'child_process';
+import path from 'path';
 import { keyInYN } from 'readline-sync';
+import { fileURLToPath } from 'url';
 import { extract } from './extract.js';
 import { rebuild } from './rebuild.js';
 import {
@@ -17,12 +19,14 @@ import {
 	tabbedLines
 } from './helpers.js';
 
-process.loadEnvFile();
-const { BOSS_AES_KEY } = process.env;
-const finalizeBossAesKey = bossAesKey => bossAesKey ?? BOSS_AES_KEY;
-// import { fileURLToPath } from 'url';
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
+const finalizeBossAesKey = (bossAesKey) => {
+	let finalizedBossAesKey = bossAesKey;
+	if (finalizedBossAesKey === undefined) {
+		process.loadEnvFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.env'));
+		finalizedBossAesKey = process.env.BOSS_AES_KEY;
+	}
+	return finalizedBossAesKey;
+};
 
 const stringifyWithTabIndent = data => JSON.stringify(data, null, '\t');
 
