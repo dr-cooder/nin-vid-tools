@@ -5,7 +5,7 @@ Command-line tools and package to extract and rebuild [Nintendo Video](https://e
 2. [Download the source code ZIP file.](https://github.com/dr-cooder/nin-vid-tools/archive/refs/heads/master.zip)
 3. Extract the ZIP file somewhere.
 4. Open a terminal window in the folder.
-5. Run `npm`.
+5. Run `npm i`.
 6. If you want to extract from and rebuild to encrypted BOSS files, you will need to provide the BOSS AES encryption key as a hexadecimal string. **I will not tell you how to acquire this key, but the program will verify that it was input correctly.**
 	- Option 1: Create a file named `.env` at the root of the folder with `BOSS_AES_KEY=(insert key here)` as its contents.
 	- Option 2: Use the option `-k (insert key here)` or `--boss-aes-key (insert key here)` when running a command that involves either decryption or encryption.
@@ -15,22 +15,22 @@ Nintendo Video / Eurosport BOSS files can be in three possible states, represent
 1. Encrypted
 	- BOSS: `name.boss`
 2. Decrypted
-	- Options: `name.boss.options.json`
-	- Content: `name.boss.content.bin`
+	- Options: `name.options.json`
+	- Content: `name.content.bin`
 3. Extracted
-	- Options: `name.boss.options.json`
-	- Metadata: `name.boss.content.bin.meta.json`
-	- Video: `name.boss.content.bin.video.moflex`
-	- Thumbnail: `name.boss.content.bin.thumb.jpg`
-	- Bottom screen ad image(s): `name.boss.content.bin.ad1.jpg` (, `name.boss.content.bin.ad2.jpg`, ...)
+	- Options: `name.options.json`
+	- Metadata: `name.meta.json`
+	- Video: `name.video.moflex`
+	- Thumbnail: `name.thumb.jpg`
+	- Bottom screen ad image(s): `name.ad1.jpg` (, `name.ad2.jpg`, ...)
 
-They can be converted between these states with the following commands:
-- Encrypted &rarr; Extracted: `src/nin-vid-tools.js decrypt-and-extract name.boss` **(Not yet implemented)**
-- Extracted &rarr; Encrypted: `src/nin-vid-tools.js rebuild-and-encrypt name.boss` **(Not yet implemented)**
-- Encrypted &rarr; Decrypted: `src/nin-vid-tools.js decrypt name.boss`
-- Decrypted &rarr; Extracted: `src/nin-vid-tools.js extract name.boss.content.bin`
-- Extracted &rarr; Decrypted: `src/nin-vid-tools.js rebuild name.boss.content.bin`
-- Decrypted &rarr; Encrypted: `src/nin-vid-tools.js encrypt name.boss`
+They can be converted between these states with the following commands, which take the source filename / base filename, and optionally the destination filename / base filename:
+- Encrypted &rarr; Extracted: `src/nin-vid-tools.js decrypt-and-extract name.boss name`
+	- Encrypted &rarr; Decrypted: `src/nin-vid-tools.js decrypt name.boss name`
+	- Decrypted &rarr; Extracted: `src/nin-vid-tools.js extract name.content.bin name`
+- Extracted &rarr; Encrypted: `src/nin-vid-tools.js rebuild-and-encrypt name name.boss`
+	- Extracted &rarr; Decrypted: `src/nin-vid-tools.js rebuild name name.content.bin`
+	- Decrypted &rarr; Encrypted: `src/nin-vid-tools.js encrypt name name.boss`
 
 The program will ask you if you want to overwrite files. To suppress this, add the `-y` or `--yes-overwrite` option.
 

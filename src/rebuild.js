@@ -3,7 +3,7 @@ import {
 	AD_DATA_SECTIONS,
 	adInvalidMetdataKeyMapFn,
 	getConstantValue
-} from './data-sections.js';
+} from '#data-sections';
 import {
 	flattenObject,
 	isType,
@@ -12,7 +12,7 @@ import {
 	accessBufferUInt,
 	isOrAre,
 	tabbedLines
-} from './helpers.js';
+} from '#helpers';
 
 const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
 	const invalidTrailingZerosKeys = [];
@@ -41,7 +41,6 @@ const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
 			}
 		} else {
 			const dataSectionLength = dataSection.length;
-			const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : intFormatLength(dataSection.format);
 			if (dataSectionType === 'subfile') {
 				const subfile = subfiles[dataSectionKey];
 				if (isType(subfile, Buffer)) {
@@ -53,6 +52,7 @@ const getOffsetsAndLength = ({ dataSections, metadata, subfiles, adCount }) => {
 					offsets[dataSectionLength] = 0;
 				}
 			} else {
+				const dataSectionActualLength = isType(dataSectionLength, Number) ? dataSectionLength : intFormatLength(dataSection.format);
 				cursor += (dataSectionType === 'adStartOffsets' || dataSectionType === 'adMetas')
 					? dataSectionActualLength * adCount
 					: dataSectionActualLength;

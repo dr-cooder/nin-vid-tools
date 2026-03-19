@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 
 import fs from 'fs';
-import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
-// import path from 'path';
-import { program } from 'commander';
 import { spawn } from 'child_process';
 import path from 'path';
-import { keyInYN } from 'readline-sync';
 import { fileURLToPath } from 'url';
-import { extract } from './extract.js';
-import { rebuild } from './rebuild.js';
+import { decrypt3DS, encrypt3DS } from '@pretendonetwork/boss-crypto';
+import { program } from 'commander';
+import { keyInYN } from 'readline-sync';
+import { extract } from '#extract';
 import {
 	isType,
 	flattenObject,
@@ -17,7 +15,8 @@ import {
 	uIntToBufferString,
 	isOrAre,
 	tabbedLines
-} from './helpers.js';
+} from '#helpers';
+import { rebuild } from '#rebuild';
 
 const finalizeBossAesKey = (bossAesKey) => {
 	let finalizedBossAesKey = bossAesKey;
@@ -69,6 +68,26 @@ const AD_SUBFILES = [
 	{ key: 'image', filename: (filename, index) => `${filename}.ad${index + 1}.jpg` }
 ];
 
+const BOSS_STATES = {
+	encrypted: 'encrypted',
+	decrypted: 'decrypted',
+	extracted: 'extracted'
+};
+
+const generateDescription = ({ missingState, awayFromBOSS }) => {
+	const missingStateIsEncrypted = missingState === BOSS_STATES.encrypted;
+	const missingStateIsExtracted = missingState === BOSS_STATES.extracted;
+	const nearStepState = missingStateIsEncrypted ? BOSS_STATES.decrypted : BOSS_STATES.encrypted;
+	const farStepState = missingStateIsExtracted ? BOSS_STATES.decrypted : BOSS_STATES.extracted;
+	const farStepFilenames = [
+		...(missingStateIsEncrypted ? [] : [optionsFilename]),
+		...(missingStateIsExtracted ? [contentFilename] : [metadataFilename, ...MAIN_SUBFILES.map(({ filename }) => filename), ...AD_SUBFILES.map(({ filename }) => val => `${filename(val, 0)} (, ${filename(val, 1)}, ...)`)]) // .map(missingStateIsEncrypted ? fn => fn : fn => val => fn(contentFilename(val)))
+	];
+	const nearStepText = filename => `${nearStepState}:${tabbedLines([filename])}`;
+	const farStepText = filename => `${farStepState}:${tabbedLines(farStepFilenames.map(fn => fn(filename)))}`;
+	return `\nconvert from ${(awayFromBOSS ? nearStepText : farStepText)('<source>')}\nto ${(awayFromBOSS ? farStepText : nearStepText)('[destination]')}\n`;
+};
+
 const readSubfiles = ({ subfileSpecs, filenameFunctionParams }) => {
 	const subfiles = {};
 	for (const { key: subfileKey, filename: subfilenameFunction } of subfileSpecs) {
@@ -87,7 +106,7 @@ const writeFiles = ({ fileDict, description, yesOverwrite }) => {
 		const filesToBeOverwritten = Object.keys(fileDict).filter(filename => fs.existsSync(filename));
 		const filesToBeOverwrittenCount = filesToBeOverwritten.length;
 		canWriteFiles = filesToBeOverwrittenCount
-			? keyInYN(`WARNING: The following ${description ? `${description} ` : ''}file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:${filesToBeOverwritten.map(filename => `\n\t${filename}`).join('')}\nIs this OK? (this can be overridden with the "-y" or "--yes-overwrite" option)`)
+			? keyInYN(`WARNING: The following ${description ? `${description} ` : ''}file${filesToBeOverwrittenCount === 1 ? '' : 's'} will be overwritten:${filesToBeOverwritten.map(filename => `\n\t${filename}`).join('')}\nIs this OK? (this warning can be suppressed with the "-y" or "--yes-overwrite" option)`)
 			: true;
 	}
 	if (canWriteFiles) {
@@ -96,110 +115,176 @@ const writeFiles = ({ fileDict, description, yesOverwrite }) => {
 	return canWriteFiles;
 };
 
+const nameOfFilesDescription = multiple => multiple ? 'base name of files' : 'name of file';
+
 const generateCommand = ({
 	name,
-	description,
-	argumentIsSource,
+	missingState,
+	awayFromBOSS,
 	requiresKey,
 	fn
 }) => (requiresKey
 		? command => command
-			.option('-k, --boss-aes-key <key>', 'BOSS AES key') // Should not be required if .env variable is set up
+			.option('-k, --boss-aes-key <key>', 'BOSS AES key (not required if specified in .env)') // Should not be required if .env variable is set up
 		: command => command
 	)(program
 		.command(name.replaceAll(' ', '-'))
-		.description(description ?? '')
-		.option('-y, --yes-overwrite', `yes, overwrite file${argumentIsSource ? 's' : ''}`))
-	.argument(...(argumentIsSource
-		? ['<source>', `file to ${name} from`]
-		: ['<destination>', `file to ${name} to`]))
-	.action((...fnArgs) => {
+		.description(generateDescription({ missingState, awayFromBOSS }))
+		.option('-y, --yes-overwrite', `yes, overwrite file${awayFromBOSS ? 's' : ''}`))
+	.argument('<source>', `${nameOfFilesDescription(!awayFromBOSS)} to ${name} from`)
+	.argument('[destination]', `${nameOfFilesDescription(awayFromBOSS)} to ${name} to (same as source if unspecified)`)
+	.action((source, destination, options) => {
 		try {
-			fn(...fnArgs);
+			fn(source, destination ?? source, options);
 		} catch (error) {
 			console.error(error.message);
 		}
 	});
 
-generateCommand({
-	name: 'extract',
-	description: 'extract description', // TODO: Write better descriptions for these commands
-	argumentIsSource: true,
-	fn: (inFilePath, { yesOverwrite }) => {
-		const inFileData = fs.readFileSync(inFilePath);
-		const { metadata, mainSubfiles, adsSubfiles, dataSectionOddities } = extract(inFileData);
-		if (dataSectionOddities) {
-			console.warn(dataSectionOddities);
-		}
+const decryptCommandStep = (pathOrBuffer, bossAesKey) => {
+	const decryption = decrypt3DS(pathOrBuffer, finalizeBossAesKey(bossAesKey));
+	delete decryption.hash_type;
+	const payloadContents0 = decryption.payload_contents[0];
+	const { content } = payloadContents0;
+	decryption.options = payloadContents0;
+	delete decryption.payload_contents;
+	return {
+		options: stringifyWithTabIndent(unflattenObject(Object.fromEntries(
+			Object.entries(flattenObject(decryption))
+				.filter(([, value]) => !isType(value, Buffer))
+				.map(([key, value]) => isType(value, BigInt) ? [key, uIntToBufferString({ uInt: value, format: '64BE' })] : [key, value])
+		))),
+		content
+	};
+};
 
-		const fileDict = {};
-		fileDict[metadataFilename(inFilePath)] = stringifyWithTabIndent(metadata);
-		MAIN_SUBFILES.forEach(({ key, filename }) => fileDict[filename(inFilePath)] = mainSubfiles[key]);
-		adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fileDict[filename(inFilePath, i)] = adSubfiles[key]));
-		writeFiles({ fileDict, description: 'extracted', yesOverwrite });
+const extractCommandStep = ({
+	contentFilenameAndContent: [baseFilename, content],
+	yesOverwrite,
+	optionsFilenameAndContent
+}) => {
+	const { metadata, mainSubfiles, adsSubfiles, dataSectionOddities } = extract(content);
+	if (dataSectionOddities) {
+		console.warn(dataSectionOddities);
 	}
-});
+
+	const fileDict = optionsFilenameAndContent ? Object.fromEntries([optionsFilenameAndContent]) : {};
+	fileDict[metadataFilename(baseFilename)] = stringifyWithTabIndent(metadata);
+	MAIN_SUBFILES.forEach(({ key, filename }) => fileDict[filename(baseFilename)] = mainSubfiles[key]);
+	adsSubfiles.forEach((adSubfiles, i) => AD_SUBFILES.forEach(({ key, filename }) => fileDict[filename(baseFilename, i)] = adSubfiles[key]));
+	writeFiles({ fileDict, description: optionsFilenameAndContent ? 'decrypted and extracted' : 'extracted', yesOverwrite });
+};
+
+const rebuildCommandStep = (sourceBase) => {
+	let metadataHasSyntaxErrors = false;
+
+	const outMetadataFilename = metadataFilename(sourceBase);
+	const metadataData = readFromFileIfItExists(outMetadataFilename);
+	let metadata;
+
+	if (metadataData === undefined) {
+		throw new Error('The metadata file was not found');
+	} else {
+		metadata = parseJSONSafely(metadataData);
+		metadataHasSyntaxErrors = metadata === undefined;
+	}
+
+	const mainSubfiles = readSubfiles({
+		subfileSpecs: MAIN_SUBFILES,
+		filenameFunctionParams: [sourceBase]
+	});
+
+	const adsSubfiles = [...Array(metadata?.ads?.length ?? 0).keys().map(i => readSubfiles({
+		subfileSpecs: AD_SUBFILES,
+		filenameFunctionParams: [sourceBase, i]
+	}))];
+
+	if (metadataHasSyntaxErrors) {
+		throw new SyntaxError('The metadata file has JSON syntax errors');
+	} else {
+		return rebuild({ metadata, mainSubfiles, adsSubfiles });
+	}
+};
+
+const encryptCommandStep = ({
+	bossAesKey,
+	files: { options: optionsOuterData, content },
+	destination,
+	yesOverwrite,
+	additionalErrors,
+	rebuilt
+}) => {
+	const optionsOuterUnmodified = parseJSONSafely(optionsOuterData);
+	const optionsHasSyntaxErrors = optionsOuterData && optionsOuterUnmodified === undefined;
+	const optionsOuterFlat = optionsOuterUnmodified && flattenObject(optionsOuterUnmodified);
+	const invalidOptions = [];
+	if (optionsOuterFlat) {
+		for (const [keyBeingTested, shouldBeBigInt] of [
+			['serial_number', true],
+			['flags', true],
+			['options.program_id', true],
+			['options.content_datatype', false],
+			['options.ns_data_id', false],
+			['options.version', false]
+		]) {
+			const valueBeingTested = optionsOuterFlat[keyBeingTested];
+			if (shouldBeBigInt
+				? isType(valueBeingTested, String) && /^[0-9a-f]{16}$/i.test(valueBeingTested)
+				: isType(valueBeingTested, Number)
+			) {
+				if (shouldBeBigInt) {
+					optionsOuterFlat[keyBeingTested] = Buffer.from(valueBeingTested, 'hex').readBigUInt64BE();
+				}
+			} else {
+				invalidOptions.push(keyBeingTested);
+			}
+		}
+	}
+	const invalidOptionCount = invalidOptions.length;
+	if (additionalErrors || optionsHasSyntaxErrors || invalidOptionCount) {
+		throw new Error([
+			...(additionalErrors ? [additionalErrors] : []),
+			...(optionsHasSyntaxErrors ? ['The options file has JSON syntax errors'] : []),
+			...(invalidOptionCount ? [`The following option key${isOrAre(invalidOptionCount)} missing or of the wrong data type:${tabbedLines(invalidOptions)}`] : [])
+		].join('\n'));
+	}
+	const { serial_number: serialNumber, flags, options } = unflattenObject(optionsOuterFlat);
+	options.content = content;
+	writeFiles({
+		fileDict: {
+			[destination]: encrypt3DS(finalizeBossAesKey(bossAesKey), serialNumber, [options], flags)
+		},
+		description: rebuilt ? 'rebuilt and encrypted' : 'encrypted',
+		yesOverwrite
+	});
+};
 
 generateCommand({
-	name: 'rebuild',
-	description: 'rebuild description',
-	argumentIsSource: false,
-	fn: (outFilePath, { yesOverwrite }) => {
-		let metadataHasSyntaxErrors = false;
-
-		const outMetadataFilename = metadataFilename(outFilePath);
-		const metadataData = readFromFileIfItExists(outMetadataFilename);
-		let metadata;
-
-		if (metadataData === undefined) {
-			throw new Error('The metadata file was not found');
-		} else {
-			metadata = parseJSONSafely(metadataData);
-			metadataHasSyntaxErrors = metadata === undefined;
-		}
-
-		const mainSubfiles = readSubfiles({
-			subfileSpecs: MAIN_SUBFILES,
-			filenameFunctionParams: [outFilePath]
+	name: 'decrypt and extract',
+	missingState: BOSS_STATES.decrypted,
+	awayFromBOSS: true,
+	requiresKey: true,
+	fn: (source, destination, { yesOverwrite, bossAesKey }) => {
+		const { options, content } = decryptCommandStep(source, bossAesKey);
+		extractCommandStep({
+			contentFilenameAndContent: [destination, content],
+			yesOverwrite,
+			optionsFilenameAndContent: [optionsFilename(destination), options]
 		});
-
-		const adsSubfiles = [...Array(metadata?.ads?.length ?? 0).keys().map(i => readSubfiles({
-			subfileSpecs: AD_SUBFILES,
-			filenameFunctionParams: [outFilePath, i]
-		}))];
-
-		if (metadataHasSyntaxErrors) {
-			throw new SyntaxError('The metadata file has JSON syntax errors');
-		} else {
-			writeFiles({
-				fileDict: { [outFilePath]: rebuild({ metadata, mainSubfiles, adsSubfiles }) },
-				description: 'rebuilt',
-				yesOverwrite
-			});
-		}
 	}
 });
 
 generateCommand({
 	name: 'decrypt',
-	description: 'decrypt description',
-	argumentIsSource: true,
+	missingState: BOSS_STATES.extracted,
+	awayFromBOSS: true,
 	requiresKey: true,
-	fn: (inFilePath, { yesOverwrite, bossAesKey }) => {
-		const decryption = decrypt3DS(inFilePath, finalizeBossAesKey(bossAesKey));
-		delete decryption.hash_type;
-		const payloadContents0 = decryption.payload_contents[0];
-		const { content } = payloadContents0;
-		decryption.options = payloadContents0;
-		delete decryption.payload_contents;
+	fn: (source, destination, { yesOverwrite, bossAesKey }) => {
+		const { options, content } = decryptCommandStep(source, bossAesKey);
 		writeFiles({
 			fileDict: {
-				[optionsFilename(inFilePath)]: stringifyWithTabIndent(unflattenObject(Object.fromEntries(
-					Object.entries(flattenObject(decryption))
-						.filter(([, value]) => !isType(value, Buffer))
-						.map(([key, value]) => isType(value, BigInt) ? [key, uIntToBufferString({ uInt: value, format: '64BE' })] : [key, value])
-				))),
-				[contentFilename(inFilePath)]: content
+				[optionsFilename(destination)]: options,
+				[contentFilename(destination)]: content
 			},
 			description: 'decrypted',
 			yesOverwrite
@@ -208,11 +293,62 @@ generateCommand({
 });
 
 generateCommand({
-	name: 'encrypt',
-	description: 'encrypt description',
-	argumentIsSource: false,
+	name: 'extract',
+	missingState: BOSS_STATES.encrypted,
+	awayFromBOSS: true,
+	fn: (source, destination, { yesOverwrite }) => extractCommandStep({
+		contentFilenameAndContent: [destination, fs.readFileSync(source)],
+		yesOverwrite
+	})
+});
+
+generateCommand({
+	name: 'rebuild and encrypt',
+	missingState: BOSS_STATES.decrypted,
+	awayFromBOSS: false,
 	requiresKey: true,
-	fn: (outFilePath, { yesOverwrite, bossAesKey }) => {
+	fn: (source, destination, { yesOverwrite, bossAesKey }) => {
+		const options = readFromFileIfItExists(optionsFilename(source));
+		const additionalErrors = options === undefined ? ['The options file is missing'] : [];
+		let content;
+		try {
+			content = rebuildCommandStep(source);
+		} catch (error) {
+			additionalErrors.push(error.message);
+		}
+		encryptCommandStep({
+			bossAesKey,
+			files: {
+				options,
+				content
+			},
+			destination,
+			yesOverwrite,
+			additionalErrors: additionalErrors.join('\n'),
+			rebuilt: true
+		});
+	}
+});
+
+generateCommand({
+	name: 'rebuild',
+	missingState: BOSS_STATES.encrypted,
+	awayFromBOSS: false,
+	fn: (source, destination, { yesOverwrite }) => {
+		writeFiles({
+			fileDict: { [destination]: rebuildCommandStep(source) },
+			description: 'rebuilt',
+			yesOverwrite
+		});
+	}
+});
+
+generateCommand({
+	name: 'encrypt',
+	missingState: BOSS_STATES.extracted,
+	awayFromBOSS: false,
+	requiresKey: true,
+	fn: (source, destination, { yesOverwrite, bossAesKey }) => {
 		const missingFiles = [];
 		const files = {};
 		for (const { filenameFunction, description } of [
@@ -225,87 +361,23 @@ generateCommand({
 				description: 'Content'
 			}
 		]) {
-			const fileData = readFromFileIfItExists(filenameFunction(outFilePath));
+			const fileData = readFromFileIfItExists(filenameFunction(source));
 			if (fileData === undefined) {
 				missingFiles.push(description);
 			} else {
 				files[description.toLowerCase()] = fileData;
 			}
 		}
-		const { options: optionsOuterData, content } = files;
-		const optionsOuterUnmodified = parseJSONSafely(optionsOuterData);
-		const optionsHasSyntaxErrors = optionsOuterData && optionsOuterUnmodified === undefined;
-		const optionsOuterFlat = !optionsHasSyntaxErrors && flattenObject(optionsOuterUnmodified);
-		const invalidOptions = [];
-		if (optionsOuterFlat) {
-			for (const [keyBeingTested, shouldBeBigInt] of [
-				['serial_number', true],
-				['flags', true],
-				['options.program_id', true],
-				['options.content_datatype', false],
-				['options.ns_data_id', false],
-				['options.version', false]
-			]) {
-				const valueBeingTested = optionsOuterFlat[keyBeingTested];
-				if (shouldBeBigInt
-					? isType(valueBeingTested, String) && /^[0-9a-f]{16}$/i.test(valueBeingTested)
-					: isType(valueBeingTested, Number)
-				) {
-					if (shouldBeBigInt) {
-						optionsOuterFlat[keyBeingTested] = Buffer.from(valueBeingTested, 'hex').readBigUInt64BE();
-					}
-				} else {
-					invalidOptions.push(keyBeingTested);
-				}
-			}
-		}
-		const invalidOptionCount = invalidOptions.length;
 		const missingFileCount = missingFiles.length;
-		if (missingFileCount || optionsHasSyntaxErrors || invalidOptionCount) {
-			throw new Error([
-				...(missingFileCount ? [`The following file${isOrAre(missingFileCount)} missing:${tabbedLines(missingFiles)}`] : []),
-				...(optionsHasSyntaxErrors ? ['The options file has JSON syntax errors'] : []),
-				...(invalidOptionCount ? [`The following option key${isOrAre(missingFileCount)} missing or of the wrong data type:${tabbedLines(invalidOptions)}`] : [])
-			].join('\n'));
-		}
-		const { serial_number: serialNumber, flags, options } = unflattenObject(optionsOuterFlat);
-		options.content = content;
-		writeFiles({
-			fileDict: {
-				[outFilePath]: encrypt3DS(finalizeBossAesKey(bossAesKey), serialNumber, [options], flags)
-			},
-			description: 'encrypted',
-			yesOverwrite
+		encryptCommandStep({
+			bossAesKey,
+			files,
+			destination,
+			yesOverwrite,
+			additionalErrors: missingFileCount && `The following file${isOrAre(missingFileCount)} missing:${tabbedLines(missingFiles)}`
 		});
 	}
 });
-
-// TODO: these two-in-one commands
-/*
-generateCommand({
-	name: 'decrypt and extract',
-	argumentIsSource: true,
-	requiresKey: true
-	fn: () => {
-		const content = Buffer.from('Hello World');
-		const encrypted = encrypt3DS(BOSS_3DS_AES_KEY, 1692231927n, {
-			program_id: 0x0004001000022900, // can also be named "title_id"
-			content_datatype: 65537,
-			ns_data_id: 36,
-			version: 1,
-			content,
-		});
-
-		fs.writeFileSync(__dirname + '/hello-world.boss', encrypted);
-	}
-});
-
-generateCommand({
-	name: 'rebuild and encrypt',
-	argumentIsSource: false,
-	requiresKey: true
-});
-*/
 
 const readVariableUInts = (buffer, cursor, count = 1) => {
 	const uInts = [];
@@ -327,12 +399,11 @@ const readVariableUInts = (buffer, cursor, count = 1) => {
 
 program
 	.command('convert')
-	.description('convert moflex using FFmpeg, auto-detecting 3D format and reformatting as side-by-side if applicable')
-	.option('-3, --is-3d', 'video is 3D (this program will be able to auto-detect this in the future)')
+	.description('convert MOFLEX using FFmpeg, auto-detecting 3D format and reformatting as full side-by-side by default if applicable')
 	.option('-h, --half', 'if the video is 3D, convert to Half 3D format')
 	.option('-v, --over-under', 'if the video is 3D, convert to OU instead of SBS')
 	.option('-s, --swap', 'if the video is 3D, swap positions of L and R images')
-	.argument('[input]', 'moflex file to be converted')
+	.argument('[input]', 'MOFLEX file to be converted')
 	.argument('[additional-ffmpeg-options...]', 'FFmpeg options, the last of which must be the output filename')
 	.action((inFilePath, additionalFFmpegOptions, { half, overUnder, swap = false }) => {
 		// https://code.ffmpeg.org/FFmpeg/FFmpeg/src/branch/release/4.4/libavformat/moflex.c

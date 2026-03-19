@@ -4,7 +4,7 @@ import {
 	AD_DATA_SECTIONS,
 	adInvalidMetdataKeyMapFn,
 	getConstantValue
-} from './data-sections.js';
+} from '#data-sections';
 import {
 	isType,
 	unflattenObject,
@@ -12,7 +12,7 @@ import {
 	intFormatLength,
 	accessBufferUInt,
 	uIntToBufferString
-} from './helpers.js';
+} from '#helpers';
 
 const readDataSection = (buffer, cursor, { length, format }) =>
 	isType(length, Number) // Only subfiles have variable length, not metadata

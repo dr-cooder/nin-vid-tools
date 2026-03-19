@@ -1,2 +1,2 @@
-export * from './extract.js';
-export * from './rebuild.js';
+export * from '#extract';
+export * from '#rebuild';
